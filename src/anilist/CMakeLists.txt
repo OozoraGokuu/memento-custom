@@ -1,0 +1,5 @@
+add_library(anilist anilistclient.cpp anilistclient.h)
+target_compile_features(anilist PUBLIC cxx_std_20)
+target_compile_options(anilist PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_include_directories(anilist PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_link_libraries(anilist PUBLIC Qt6::Network Qt6::Gui PRIVATE utils episodefolder mpvplayer)

@@ -1,0 +1,1294 @@
+# Modified from https://nsis.sourceforge.io/A_simple_installer_with_start_menu_shortcut_and_uninstaller
+
+!define APPNAME "Memento Study Edition"
+!define COMPANYNAME "mu0dev"
+!define DESCRIPTION "A Japanese study player with Jimaku and single-episode torrent streaming."
+!define VERSIONMAJOR @PROJECT_VERSION_MAJOR@
+!define VERSIONMINOR @PROJECT_VERSION_MINOR@
+!define VERSIONBUILD @PROJECT_VERSION_PATCH@
+!define VERSIONREVISION 0
+!define DISPLAYVERSION "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
+!define INSTALLMARKER ".memento-study-edition-install"
+!define INSTALLMARKERCONTENT "${APPNAME} installed v1"
+!define OWNERSHIPMANIFEST ".memento-study-edition-owned-files"
+!define RESIDUEMARKER ".memento-study-edition-residue"
+!define RESIDUEMARKERCONTENT "${APPNAME} directory v1"
+!define STAGEDIR ".memento-study-edition-stage"
+!define STAGEMARKER ".memento-study-edition-stage-marker"
+!define STAGEMARKERCONTENT "${APPNAME} staging v1"
+!define UNINSTALLKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}"
+!define HELPURL "https://github.com/mu0dev/memento-custom/blob/main/README.md"
+!define UPDATEURL "https://github.com/mu0dev/memento-custom/releases"
+!define ABOUTURL "https://github.com/mu0dev/memento-custom"
+!define INSTALLSIZE 240000
+
+!ifndef MEMENTO_INSTALLER_OUTFILE
+!define MEMENTO_INSTALLER_OUTFILE "Memento_Windows_x86_64_Installer.exe"
+!endif
+!ifndef MEMENTO_RUNTIME_DIR
+!define MEMENTO_RUNTIME_DIR "Memento_x86_64"
+!endif
+!ifndef MEMENTO_FILE_LIST
+!define MEMENTO_FILE_LIST "uninstall-files.nsh"
+!endif
+!ifndef MEMENTO_OWNERSHIP_MANIFEST_SOURCE
+!define MEMENTO_OWNERSHIP_MANIFEST_SOURCE "owned-files.txt"
+!endif
+!ifndef MEMENTO_LOGO_SOURCE
+!define MEMENTO_LOGO_SOURCE "logo.ico"
+!endif
+
+RequestExecutionLevel admin
+InstallDir "$PROGRAMFILES64\${APPNAME}"
+LicenseData "license.rtf"
+Name "${APPNAME}"
+Icon "logo.ico"
+OutFile "${MEMENTO_INSTALLER_OUTFILE}"
+
+Page license
+Page instfiles
+
+Var InstallState
+Var OperationResult
+Var ResidueWasPresent
+Var RegistryOwned
+Var ShortcutCommitted
+Var PreviousBackupPresent
+Var RegistryBackupPresent
+Var PreviousRemovalCompleted
+
+!macro MementoCheckOwnedFile FILE_PATH FAILURE_LABEL
+	IfFileExists "${FILE_PATH}" 0 +5
+	ClearErrors
+	FileOpen $R9 "${FILE_PATH}" a
+	IfErrors ${FAILURE_LABEL}
+	FileClose $R9
+!macroend
+
+!macro MementoDeleteOwnedFile FILE_PATH FAILURE_LABEL
+	IfFileExists "${FILE_PATH}" 0 +4
+	ClearErrors
+	Delete "${FILE_PATH}"
+	IfErrors ${FAILURE_LABEL}
+!macroend
+
+!macro MementoCheckInstallCollision FILE_PATH FAILURE_LABEL
+	IfFileExists "${FILE_PATH}" ${FAILURE_LABEL} 0
+!macroend
+
+!macro MementoRequireFile FILE_PATH FAILURE_LABEL
+	IfFileExists "${FILE_PATH}" 0 ${FAILURE_LABEL}
+!macroend
+
+!macro MementoMoveStagedFile SOURCE_PATH DESTINATION_PATH FAILURE_LABEL
+	ClearErrors
+	Rename "${SOURCE_PATH}" "${DESTINATION_PATH}"
+	IfErrors ${FAILURE_LABEL}
+!macroend
+
+!macro MementoCopyFileNoOverwrite SOURCE_PATH DESTINATION_PATH FAILURE_LABEL
+	System::Call \
+		'kernel32::CopyFileW(w "${SOURCE_PATH}", w "${DESTINATION_PATH}", i 1) i .R8'
+	StrCmp $R8 "0" ${FAILURE_LABEL}
+!macroend
+
+!macro MementoCopyStagedFileNoOverwrite SOURCE_PATH DESTINATION_PATH FAILURE_LABEL
+	# CopyFileW supports redirected Start Menu folders on another volume while
+	# its final parameter atomically refuses to overwrite an existing entry.
+	!insertmacro MementoCopyFileNoOverwrite "${SOURCE_PATH}" "${DESTINATION_PATH}" ${FAILURE_LABEL}
+	StrCpy $ShortcutCommitted "1"
+!macroend
+
+!macro MementoCopyFileIfPresent SOURCE_PATH DESTINATION_PATH SKIP_LABEL FAILURE_LABEL
+	IfFileExists "${SOURCE_PATH}" 0 ${SKIP_LABEL}
+	!insertmacro MementoCopyFileNoOverwrite "${SOURCE_PATH}" "${DESTINATION_PATH}" ${FAILURE_LABEL}
+	${SKIP_LABEL}:
+!macroend
+
+!macro MementoRestoreFileIfBackedUp SOURCE_PATH DESTINATION_PATH SKIP_LABEL FAILURE_LABEL
+	IfFileExists "${SOURCE_PATH}" 0 ${SKIP_LABEL}
+	IfFileExists "${DESTINATION_PATH}" 0 ${SKIP_LABEL}_copy
+	StrCmp $PreviousRemovalCompleted "1" ${FAILURE_LABEL} ${SKIP_LABEL}
+	${SKIP_LABEL}_copy:
+	!insertmacro MementoCopyFileNoOverwrite "${SOURCE_PATH}" "${DESTINATION_PATH}" ${FAILURE_LABEL}
+	${SKIP_LABEL}:
+!macroend
+
+!macro MementoRollbackStagedFile SOURCE_PATH DESTINATION_PATH SKIP_LABEL FAILURE_LABEL
+	# A successful move consumes the staged source. If it is still present,
+	# this transaction never created the destination and rollback must not touch
+	# a path another process may have created in the meantime.
+	IfFileExists "${SOURCE_PATH}" ${SKIP_LABEL}
+	!insertmacro MementoDeleteOwnedFile "${DESTINATION_PATH}" ${FAILURE_LABEL}
+	${SKIP_LABEL}:
+!macroend
+
+!macro MementoWriteMarker FILE_PATH CONTENT FAILURE_LABEL
+	ClearErrors
+	FileOpen $R9 "${FILE_PATH}" w
+	IfErrors ${FAILURE_LABEL}
+	FileWrite $R9 "${CONTENT}$\r$\n"
+	IfErrors 0 +3
+		FileClose $R9
+		Goto ${FAILURE_LABEL}
+	FileClose $R9
+!macroend
+
+!macro MementoFatal MESSAGE
+	# Silent test runs opt in to diagnostics without changing normal installs.
+	ReadEnvStr $R8 "MEMENTO_INSTALLER_LOG"
+	StrCmp $R8 "" +6
+	ClearErrors
+	FileOpen $R9 "$R8" a
+	IfErrors +3
+	FileWrite $R9 "${MESSAGE}$\r$\n"
+	FileClose $R9
+	SetErrorLevel 2
+	MessageBox MB_ICONSTOP|MB_OK "${MESSAGE}" /SD IDOK
+	Quit
+!macroend
+
+!include "FileFunc.nsh"
+!include "${MEMENTO_FILE_LIST}"
+
+Function .onInit
+	SetShellVarContext all
+	SetRegView 64
+	# Ignore /D=. Every owned path is rooted at this canonical directory.
+	StrCpy $INSTDIR "$PROGRAMFILES64\${APPNAME}"
+	StrCpy $InstallState ""
+	StrCpy $OperationResult "0"
+	StrCpy $ResidueWasPresent "0"
+	StrCpy $RegistryOwned "0"
+	StrCpy $ShortcutCommitted "0"
+	StrCpy $PreviousBackupPresent "0"
+	StrCpy $RegistryBackupPresent "0"
+	StrCpy $PreviousRemovalCompleted "0"
+FunctionEnd
+
+Function .onInstFailed
+	# NSIS invokes this callback for extraction/decompression failures that bypass
+	# normal section labels. The old installation has not been touched yet.
+	Call CleanStage
+	SetOutPath "$TEMP"
+	RMDir "$INSTDIR"
+FunctionEnd
+
+Function ValidateResidueMarker
+	StrCpy $OperationResult "1"
+	ClearErrors
+	FileOpen $0 "$INSTDIR\${RESIDUEMARKER}" r
+	IfErrors residue_validation_done
+	FileRead $0 $1
+	StrCpy $2 ""
+	FileRead $0 $2
+	FileClose $0
+	StrCmp $2 "" 0 residue_validation_done
+	ClearErrors
+	StrCmp $1 "${RESIDUEMARKERCONTENT}$\r$\n" residue_validation_valid
+	StrCmp $1 "${RESIDUEMARKERCONTENT}$\n" residue_validation_valid residue_validation_done
+
+	residue_validation_valid:
+		StrCpy $OperationResult "0"
+	residue_validation_done:
+FunctionEnd
+
+Function ValidateExistingDirectory
+	Exch $0
+	Push $1
+	Push $2
+	StrCpy $OperationResult "1"
+	System::Call 'kernel32::GetFileAttributesW(w r0) i .r1'
+	IntCmp $1 -1 existing_directory_done existing_directory_bits existing_directory_bits
+	existing_directory_bits:
+		IntOp $2 $1 & 16
+		IntCmp $2 0 existing_directory_done existing_directory_reparse existing_directory_reparse
+	existing_directory_reparse:
+		IntOp $2 $1 & 1024
+		IntCmp $2 0 existing_directory_valid existing_directory_done existing_directory_done
+	existing_directory_valid:
+		StrCpy $OperationResult "0"
+	existing_directory_done:
+		Pop $2
+		Pop $1
+		Pop $0
+FunctionEnd
+
+Function EnsureInstallDirectory
+	Exch $0
+	Push $1
+	Push $2
+	StrCpy $OperationResult "1"
+	IfFileExists "$0" ensure_directory_validate
+	ClearErrors
+	CreateDirectory "$0"
+	IfErrors ensure_directory_done
+	ensure_directory_validate:
+		System::Call 'kernel32::GetFileAttributesW(w r0) i .r1'
+		IntCmp $1 -1 ensure_directory_done ensure_directory_bits ensure_directory_bits
+	ensure_directory_bits:
+		IntOp $2 $1 & 16
+		IntCmp $2 0 ensure_directory_done ensure_directory_reparse ensure_directory_reparse
+	ensure_directory_reparse:
+		IntOp $2 $1 & 1024
+		IntCmp $2 0 ensure_directory_valid ensure_directory_done ensure_directory_done
+	ensure_directory_valid:
+		StrCpy $OperationResult "0"
+	ensure_directory_done:
+		Pop $2
+		Pop $1
+		Pop $0
+FunctionEnd
+
+Function RegistryKeyExists
+	# NSIS enumeration cannot distinguish an absent key from an existing empty
+	# key. Query the native 64-bit view directly so an empty or inaccessible key
+	# is still treated as occupied, never as permission to overwrite metadata.
+	StrCpy $OperationResult "1"
+	System::Call \
+		'advapi32::RegOpenKeyExW(p 0x80000002, w "${UNINSTALLKEY}", i 0, i 0x20119, *p .r0) i .r1'
+	StrCmp $1 "0" registry_key_opened
+	StrCmp $1 "2" registry_key_absent
+	StrCmp $1 "3" registry_key_absent registry_key_done
+
+	registry_key_opened:
+		System::Call 'advapi32::RegCloseKey(p r0)'
+		Goto registry_key_done
+	registry_key_absent:
+		StrCpy $OperationResult "0"
+	registry_key_done:
+FunctionEnd
+
+Function ReserveUninstallRegistryKey
+	# RegCreateKeyExW reports whether it created or merely opened the key. This
+	# is the atomic counterpart to the earlier friendly collision check.
+	StrCpy $OperationResult "1"
+	StrCpy $RegistryOwned "0"
+	System::Call \
+		'advapi32::RegCreateKeyExW(p 0x80000002, w "${UNINSTALLKEY}", i 0, p 0, i 0, i 0x20106, p 0, *p .r0, *i .r1) i .r2'
+	StrCmp $2 "0" registry_reservation_opened registry_reservation_done
+	registry_reservation_opened:
+		System::Call 'advapi32::RegCloseKey(p r0)'
+		# REG_CREATED_NEW_KEY is 1; REG_OPENED_EXISTING_KEY is 2.
+		StrCmp $1 "1" registry_reservation_created registry_reservation_done
+	registry_reservation_created:
+		StrCpy $RegistryOwned "1"
+		StrCpy $OperationResult "0"
+	registry_reservation_done:
+FunctionEnd
+
+Function CleanStage
+	StrCpy $OperationResult "0"
+	IfFileExists "$INSTDIR\${STAGEDIR}" 0 stage_cleanup_done
+	Push "$INSTDIR\${STAGEDIR}"
+	Call ValidateExistingDirectory
+	StrCmp $OperationResult "0" 0 stage_cleanup_failed
+
+	# A recursive removal is intentionally not used. Only compiled, owned paths
+	# are removed, and any unexpected content leaves the stage in place.
+	ClearErrors
+	FileOpen $0 "$INSTDIR\${STAGEDIR}\${STAGEMARKER}" r
+	IfErrors stage_cleanup_failed
+	FileRead $0 $1
+	StrCpy $2 ""
+	FileRead $0 $2
+	FileClose $0
+	StrCmp $2 "" 0 stage_cleanup_failed
+	ClearErrors
+	StrCmp $1 "${STAGEMARKERCONTENT}$\r$\n" stage_marker_valid
+	StrCmp $1 "${STAGEMARKERCONTENT}$\n" stage_marker_valid stage_cleanup_failed
+
+	stage_marker_valid:
+		SetOutPath "$TEMP"
+		!insertmacro MementoValidateStagedPortableDirectories stage_cleanup_failed
+		!insertmacro MementoDeleteStagedPortableFiles stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\logo.ico" stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\${OWNERSHIPMANIFEST}" stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\${INSTALLMARKER}" stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\${RESIDUEMARKER}" stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\uninstall.exe" stage_cleanup_failed
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\${APPNAME}.lnk" stage_cleanup_failed
+		!insertmacro MementoRemoveStagedPortableDirectories
+
+		# Preserve the marker unless it is the only remaining entry. This prevents
+		# a later setup from mistaking unexpected stage content for its own data.
+		ClearErrors
+		FindFirst $0 $1 "$INSTDIR\${STAGEDIR}\*.*"
+		IfErrors stage_cleanup_failed
+	stage_entry_loop:
+		StrCmp $1 "" stage_entries_done
+		StrCmp $1 "." stage_next_entry
+		StrCmp $1 ".." stage_next_entry
+		StrCmp $1 "${STAGEMARKER}" stage_next_entry
+		FindClose $0
+		Goto stage_cleanup_failed
+	stage_next_entry:
+		ClearErrors
+		FindNext $0 $1
+		IfErrors stage_entries_done
+		Goto stage_entry_loop
+	stage_entries_done:
+		FindClose $0
+		ClearErrors
+		Delete "$INSTDIR\${STAGEDIR}\${STAGEMARKER}"
+		IfErrors stage_cleanup_failed
+		ClearErrors
+		RMDir "$INSTDIR\${STAGEDIR}"
+		IfErrors stage_directory_remove_failed
+		Goto stage_cleanup_done
+
+	stage_directory_remove_failed:
+		# A transient handle can prevent removal after the marker was deleted.
+		# Restore the marker so the next setup can identify and retry this exact
+		# owned stage instead of leaving an ambiguous unmarked directory.
+		!insertmacro MementoWriteMarker "$INSTDIR\${STAGEDIR}\${STAGEMARKER}" "${STAGEMARKERCONTENT}" stage_cleanup_failed
+		Goto stage_cleanup_failed
+
+	stage_cleanup_failed:
+		StrCpy $OperationResult "1"
+	stage_cleanup_done:
+FunctionEnd
+
+Function InspectInstallDirectory
+	StrCpy $OperationResult "0"
+	StrCpy $InstallState "clean"
+	StrCpy $ResidueWasPresent "0"
+
+	IfFileExists "$INSTDIR\${INSTALLMARKER}" inspect_installed
+	IfFileExists "$INSTDIR\${RESIDUEMARKER}" inspect_residual
+	IfFileExists "$INSTDIR" inspect_unmarked_directory inspect_done
+
+	inspect_unmarked_directory:
+		# An empty pre-created canonical directory is safe. FindFirst errors are
+		# conservative because an unreadable directory must never be treated as
+		# empty and then populated.
+		ClearErrors
+		FindFirst $0 $1 "$INSTDIR\*.*"
+		IfErrors inspect_invalid
+	inspect_unmarked_loop:
+		StrCmp $1 "" inspect_unmarked_empty
+		StrCmp $1 "." inspect_unmarked_next
+		StrCmp $1 ".." inspect_unmarked_next
+		FindClose $0
+		Goto inspect_unsafe
+	inspect_unmarked_next:
+		ClearErrors
+		FindNext $0 $1
+		IfErrors inspect_unmarked_empty
+		Goto inspect_unmarked_loop
+	inspect_unmarked_empty:
+		FindClose $0
+		Goto inspect_done
+
+	inspect_installed:
+		ClearErrors
+		FileOpen $0 "$INSTDIR\${INSTALLMARKER}" r
+		IfErrors inspect_invalid
+		FileRead $0 $1
+		StrCpy $2 ""
+		FileRead $0 $2
+		FileClose $0
+		StrCmp $2 "" 0 inspect_invalid
+		ClearErrors
+		StrCmp $1 "${INSTALLMARKERCONTENT}$\r$\n" install_marker_valid
+		StrCmp $1 "${INSTALLMARKERCONTENT}$\n" install_marker_valid inspect_invalid
+	install_marker_valid:
+		IfFileExists "$INSTDIR\${RESIDUEMARKER}" 0 inspect_invalid
+		Call ValidateResidueMarker
+		StrCmp $OperationResult "0" 0 inspect_invalid
+		StrCpy $ResidueWasPresent "1"
+		IfFileExists "$INSTDIR\uninstall.exe" 0 inspect_partial
+		StrCpy $InstallState "installed"
+		Goto inspect_done
+	inspect_partial:
+		# The uninstaller is deleted before the install marker. A marker-only
+		# partial state can therefore be recovered without executing an
+		# untrusted file that merely happens to be named uninstall.exe.
+		StrCpy $InstallState "partial"
+		Goto inspect_done
+
+	inspect_residual:
+		Call ValidateResidueMarker
+		StrCmp $OperationResult "0" 0 inspect_invalid
+		StrCpy $ResidueWasPresent "1"
+		# Without a valid install marker, an uninstall.exe is an unknown
+		# collision and must never be copied and executed as an upgrader.
+		IfFileExists "$INSTDIR\uninstall.exe" inspect_unsafe
+		StrCpy $InstallState "residual"
+		Goto inspect_done
+
+	inspect_unsafe:
+		StrCpy $OperationResult "2"
+		Goto inspect_done
+	inspect_invalid:
+		StrCpy $OperationResult "1"
+	inspect_done:
+FunctionEnd
+
+Function CheckExternalMetadataCollision
+	StrCpy $OperationResult "0"
+	IfFileExists "$SMPROGRAMS\${APPNAME}.lnk" metadata_collision
+	Call RegistryKeyExists
+	StrCmp $OperationResult "0" metadata_collision_done
+	metadata_collision:
+		StrCpy $OperationResult "1"
+	metadata_collision_done:
+FunctionEnd
+
+Function DeleteUninstallRegistryKey
+	ClearErrors
+	DeleteRegKey HKLM "${UNINSTALLKEY}"
+	# Missing is success; an empty key that survived because of permissions is
+	# still failure. RegistryKeyExists makes that distinction exactly.
+	Call RegistryKeyExists
+FunctionEnd
+
+Function ValidateManifestRelativePath
+	Exch $0
+	Push $1
+	Push $2
+	Push $3
+	Push $4
+	StrCpy $OperationResult "1"
+	StrCmp $0 "" manifest_path_done
+	StrLen $1 $0
+	IntCmp $1 1024 manifest_path_prepare manifest_path_prepare manifest_path_done
+	manifest_path_prepare:
+	StrCpy $2 $0 1
+	StrCmp $2 "\" manifest_path_done
+	StrCmp $2 "/" manifest_path_done
+	StrCpy $2 "0"
+	StrCpy $3 ""
+
+	manifest_path_loop:
+		IntCmp $2 $1 manifest_path_valid manifest_path_character manifest_path_done
+	manifest_path_character:
+		StrCpy $4 $0 1 $2
+		StrCmp $4 "/" manifest_path_done
+		StrCmp $4 ":" manifest_path_done
+		StrCmp $4 "<" manifest_path_done
+		StrCmp $4 ">" manifest_path_done
+		StrCmp $4 "$\"" manifest_path_done
+		StrCmp $4 "|" manifest_path_done
+		StrCmp $4 "?" manifest_path_done
+		StrCmp $4 "*" manifest_path_done
+		StrCmp $4 "$$" manifest_path_done
+		StrCmp $4 "$\r" manifest_path_done
+		StrCmp $4 "$\n" manifest_path_done
+		StrCmp $4 "$\t" manifest_path_done
+		StrCmp $4 "\" manifest_path_separator
+		StrCmp $4 "." manifest_path_dot
+		StrCpy $3 $4
+		IntOp $2 $2 + 1
+		Goto manifest_path_loop
+	manifest_path_dot:
+		# Conservatively reject every '..' sequence. Generated package paths never
+		# need one, and this closes traversal without relying on canonicalization.
+		StrCmp $3 "." manifest_path_done
+		StrCpy $3 "."
+		IntOp $2 $2 + 1
+		Goto manifest_path_loop
+	manifest_path_separator:
+		StrCmp $3 "" manifest_path_done
+		StrCmp $3 "\" manifest_path_done
+		StrCmp $3 "." manifest_path_done
+		StrCmp $3 " " manifest_path_done
+		StrCpy $3 "\"
+		IntOp $2 $2 + 1
+		Goto manifest_path_loop
+	manifest_path_valid:
+		StrCmp $3 "\" manifest_path_done
+		StrCmp $3 "." manifest_path_done
+		StrCmp $3 " " manifest_path_done
+		StrCpy $OperationResult "0"
+	manifest_path_done:
+		Pop $4
+		Pop $3
+		Pop $2
+		Pop $1
+		Pop $0
+FunctionEnd
+
+Function ValidateInstalledManifestFile
+	Exch $0
+	Push $1
+	Push $2
+	Push $3
+	StrCpy $OperationResult "1"
+	Push $0
+	Call ValidateManifestRelativePath
+	StrCmp $OperationResult "0" 0 installed_manifest_file_done_failed
+	StrCpy $1 "$INSTDIR\$0"
+	IfFileExists "$1" 0 installed_manifest_file_valid
+	System::Call 'kernel32::GetFileAttributesW(w r1) i .r2'
+	IntCmp $2 -1 installed_manifest_file_done_failed installed_manifest_file_bits installed_manifest_file_bits
+	installed_manifest_file_bits:
+		IntOp $3 $2 & 16
+		IntCmp $3 0 installed_manifest_file_reparse installed_manifest_file_done_failed installed_manifest_file_done_failed
+	installed_manifest_file_reparse:
+		IntOp $3 $2 & 1024
+		IntCmp $3 0 installed_manifest_file_parent installed_manifest_file_done_failed installed_manifest_file_done_failed
+	installed_manifest_file_parent:
+		${GetParent} "$1" $2
+	installed_manifest_parent_loop:
+		StrCmp $2 "$INSTDIR" installed_manifest_file_valid
+		Push $2
+		Call ValidateExistingDirectory
+		StrCmp $OperationResult "0" 0 installed_manifest_file_done_failed
+		StrCpy $3 $2
+		${GetParent} "$2" $2
+		StrCmp $2 $3 installed_manifest_file_done_failed
+		Goto installed_manifest_parent_loop
+	installed_manifest_file_valid:
+		StrCpy $OperationResult "0"
+		Goto installed_manifest_file_done
+	installed_manifest_file_done_failed:
+		StrCpy $OperationResult "1"
+	installed_manifest_file_done:
+		Pop $3
+		Pop $2
+		Pop $1
+		Pop $0
+FunctionEnd
+
+Function ValidateInstalledOwnershipManifest
+	Push $5
+	Push $6
+	Push $7
+	Push $8
+	Push $9
+	StrCpy $OperationResult "1"
+	StrCpy $5 "0"
+	StrCpy $6 "0"
+	StrCpy $7 "0"
+	StrCpy $8 "0"
+	StrCpy $9 "0"
+	IfFileExists "$INSTDIR\${OWNERSHIPMANIFEST}" 0 ownership_manifest_done_failed
+	System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR\${OWNERSHIPMANIFEST}") i .r0'
+	IntCmp $0 -1 ownership_manifest_done_failed ownership_manifest_attributes ownership_manifest_attributes
+	ownership_manifest_attributes:
+		IntOp $1 $0 & 1040
+		IntCmp $1 0 ownership_manifest_open ownership_manifest_done_failed ownership_manifest_done_failed
+	ownership_manifest_open:
+		ClearErrors
+		FileOpen $0 "$INSTDIR\${OWNERSHIPMANIFEST}" r
+		IfErrors ownership_manifest_done_failed
+		StrCpy $2 ""
+		StrCpy $3 "0"
+	ownership_manifest_read:
+		ClearErrors
+		FileRead $0 $1
+		IfErrors ownership_manifest_eof
+		StrCpy $4 $1 1 -1
+		StrCmp $4 "$\n" 0 +2
+			StrCpy $1 $1 -1
+		StrCpy $4 $1 1 -1
+		StrCmp $4 "$\r" 0 +2
+			StrCpy $1 $1 -1
+		Push $1
+		Call ValidateInstalledManifestFile
+		StrCmp $OperationResult "0" 0 ownership_manifest_invalid
+		StrCmp $1 "memento.exe" 0 +2
+			StrCpy $5 "1"
+		StrCmp $1 "logo.ico" 0 +2
+			StrCpy $6 "1"
+		StrCmp $1 "uninstall.exe" 0 +2
+			StrCpy $7 "1"
+		StrCmp $1 "${INSTALLMARKER}" 0 +2
+			StrCpy $8 "1"
+		StrCmp $1 "${OWNERSHIPMANIFEST}" 0 +2
+			StrCpy $9 "1"
+		StrCpy $2 $1
+		IntOp $3 $3 + 1
+		Goto ownership_manifest_read
+	ownership_manifest_eof:
+		FileClose $0
+		IntCmp $3 1 ownership_manifest_last ownership_manifest_done_failed ownership_manifest_last
+	ownership_manifest_last:
+		StrCmp $2 "${OWNERSHIPMANIFEST}" 0 ownership_manifest_done_failed
+		StrCmp $5 "1" 0 ownership_manifest_done_failed
+		StrCmp $6 "1" 0 ownership_manifest_done_failed
+		StrCmp $7 "1" 0 ownership_manifest_done_failed
+		StrCmp $8 "1" 0 ownership_manifest_done_failed
+		StrCmp $9 "1" ownership_manifest_valid ownership_manifest_done_failed
+	ownership_manifest_invalid:
+		FileClose $0
+		Goto ownership_manifest_done_failed
+	ownership_manifest_valid:
+		StrCpy $OperationResult "0"
+		Goto ownership_manifest_done
+	ownership_manifest_done_failed:
+		StrCpy $OperationResult "1"
+	ownership_manifest_done:
+		Pop $9
+		Pop $8
+		Pop $7
+		Pop $6
+		Pop $5
+FunctionEnd
+
+Function BackupInstalledOwnershipManifest
+	StrCpy $OperationResult "1"
+	ClearErrors
+	FileOpen $0 "$INSTDIR\${OWNERSHIPMANIFEST}" r
+	IfErrors backup_manifest_done_failed
+	backup_manifest_read:
+		ClearErrors
+		FileRead $0 $1
+		IfErrors backup_manifest_eof
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\n" 0 +2
+			StrCpy $1 $1 -1
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\r" 0 +2
+			StrCpy $1 $1 -1
+		Push $1
+		Call ValidateInstalledManifestFile
+		StrCmp $OperationResult "0" 0 backup_manifest_invalid
+		IfFileExists "$INSTDIR\$1" 0 backup_manifest_read
+		${GetParent} "$PLUGINSDIR\memento-previous-files\$1" $2
+		Push $2
+		Call EnsureInstallDirectory
+		StrCmp $OperationResult "0" 0 backup_manifest_invalid
+		!insertmacro MementoCopyFileNoOverwrite "$INSTDIR\$1" "$PLUGINSDIR\memento-previous-files\$1" backup_manifest_invalid
+		Goto backup_manifest_read
+	backup_manifest_eof:
+		FileClose $0
+		!insertmacro MementoRequireFile "$PLUGINSDIR\memento-previous-files\${OWNERSHIPMANIFEST}" backup_manifest_done_failed
+		StrCpy $OperationResult "0"
+		Goto backup_manifest_done
+	backup_manifest_invalid:
+		FileClose $0
+	backup_manifest_done_failed:
+		StrCpy $OperationResult "1"
+	backup_manifest_done:
+FunctionEnd
+
+Function RestoreInstalledOwnershipManifest
+	StrCpy $OperationResult "1"
+	ClearErrors
+	FileOpen $0 "$PLUGINSDIR\memento-previous-files\${OWNERSHIPMANIFEST}" r
+	IfErrors restore_manifest_done_failed
+	restore_manifest_read:
+		ClearErrors
+		FileRead $0 $1
+		IfErrors restore_manifest_eof
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\n" 0 +2
+			StrCpy $1 $1 -1
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\r" 0 +2
+			StrCpy $1 $1 -1
+		Push $1
+		Call ValidateManifestRelativePath
+		StrCmp $OperationResult "0" 0 restore_manifest_invalid
+		IfFileExists "$PLUGINSDIR\memento-previous-files\$1" 0 restore_manifest_read
+		IfFileExists "$INSTDIR\$1" 0 restore_manifest_copy
+		StrCmp $PreviousRemovalCompleted "1" restore_manifest_invalid restore_manifest_read
+	restore_manifest_copy:
+		${GetParent} "$INSTDIR\$1" $2
+		Push $2
+		Call EnsureInstallDirectory
+		StrCmp $OperationResult "0" 0 restore_manifest_invalid
+		!insertmacro MementoCopyFileNoOverwrite "$PLUGINSDIR\memento-previous-files\$1" "$INSTDIR\$1" restore_manifest_invalid
+		Goto restore_manifest_read
+	restore_manifest_eof:
+		FileClose $0
+		StrCpy $OperationResult "0"
+		Goto restore_manifest_done
+	restore_manifest_invalid:
+		FileClose $0
+	restore_manifest_done_failed:
+		StrCpy $OperationResult "1"
+	restore_manifest_done:
+FunctionEnd
+
+Function RemovePartialOwnedFiles
+	# First validate every surviving manifest-owned file and confirm it is not
+	# locked. No file is removed unless this complete preflight succeeds.
+	StrCpy $OperationResult "1"
+	Call ValidateInstalledOwnershipManifest
+	StrCmp $OperationResult "0" 0 partial_manifest_remove_done_failed
+	ClearErrors
+	FileOpen $0 "$INSTDIR\${OWNERSHIPMANIFEST}" r
+	IfErrors partial_manifest_remove_done_failed
+	partial_manifest_check_read:
+		ClearErrors
+		FileRead $0 $1
+		IfErrors partial_manifest_check_eof
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\n" 0 +2
+			StrCpy $1 $1 -1
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\r" 0 +2
+			StrCpy $1 $1 -1
+		# FileOpen shares reads only. Check this manifest for writes after closing
+		# our reader, so the preflight cannot mistake its own handle for a lock.
+		StrCmp $1 "${OWNERSHIPMANIFEST}" partial_manifest_check_read
+		!insertmacro MementoCheckOwnedFile "$INSTDIR\$1" partial_manifest_check_invalid
+		Goto partial_manifest_check_read
+	partial_manifest_check_eof:
+		FileClose $0
+		!insertmacro MementoCheckOwnedFile "$INSTDIR\${OWNERSHIPMANIFEST}" partial_manifest_remove_done_failed
+		ClearErrors
+		FileOpen $0 "$INSTDIR\${OWNERSHIPMANIFEST}" r
+		IfErrors partial_manifest_remove_done_failed
+	partial_manifest_delete_read:
+		ClearErrors
+		FileRead $0 $1
+		IfErrors partial_manifest_delete_eof
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\n" 0 +2
+			StrCpy $1 $1 -1
+		StrCpy $2 $1 1 -1
+		StrCmp $2 "$\r" 0 +2
+			StrCpy $1 $1 -1
+		StrCmp $1 "${INSTALLMARKER}" partial_manifest_delete_read
+		StrCmp $1 "${OWNERSHIPMANIFEST}" partial_manifest_delete_read
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\$1" partial_manifest_delete_invalid
+		${GetParent} "$INSTDIR\$1" $2
+	partial_manifest_parent_remove:
+		StrCmp $2 "$INSTDIR" partial_manifest_delete_read
+		RMDir "$2"
+		${GetParent} "$2" $2
+		Goto partial_manifest_parent_remove
+	partial_manifest_delete_eof:
+		FileClose $0
+		StrCpy $OperationResult "0"
+		Goto partial_manifest_remove_done
+	partial_manifest_check_invalid:
+		FileClose $0
+		Goto partial_manifest_remove_done_failed
+	partial_manifest_delete_invalid:
+		FileClose $0
+	partial_manifest_remove_done_failed:
+		StrCpy $OperationResult "1"
+	partial_manifest_remove_done:
+FunctionEnd
+
+Function BackupPreviousInstallation
+	# The installed version's own manifest, rather than the incoming package's
+	# file list, defines the exact rollback set across version changes.
+	StrCpy $OperationResult "1"
+	StrCpy $PreviousBackupPresent "0"
+	StrCpy $RegistryBackupPresent "0"
+	InitPluginsDir
+	Push "$PLUGINSDIR\memento-previous-files"
+	Call EnsureInstallDirectory
+	StrCmp $OperationResult "0" 0 previous_backup_failed
+	Call ValidateInstalledOwnershipManifest
+	StrCmp $OperationResult "0" 0 previous_backup_failed
+	Call BackupInstalledOwnershipManifest
+	StrCmp $OperationResult "0" 0 previous_backup_failed
+	!insertmacro MementoCopyFileIfPresent "$SMPROGRAMS\${APPNAME}.lnk" "$PLUGINSDIR\memento-previous-files\${APPNAME}.lnk" previous_backup_shortcut_done previous_backup_failed
+
+	Call RegistryKeyExists
+	StrCmp $OperationResult "0" previous_backup_registry_done
+	ClearErrors
+	ExecWait \
+		'"$SYSDIR\reg.exe" export "HKLM\${UNINSTALLKEY}" "$PLUGINSDIR\memento-previous.reg" /y /reg:64' \
+		$0
+	IfErrors previous_backup_failed
+	StrCmp $0 "0" 0 previous_backup_failed
+	!insertmacro MementoRequireFile "$PLUGINSDIR\memento-previous.reg" previous_backup_failed
+	StrCpy $RegistryBackupPresent "1"
+
+	previous_backup_registry_done:
+		StrCpy $PreviousBackupPresent "1"
+		StrCpy $OperationResult "0"
+		Goto previous_backup_done
+	previous_backup_failed:
+		StrCpy $OperationResult "1"
+	previous_backup_done:
+FunctionEnd
+
+Function RestorePreviousInstallation
+	StrCpy $OperationResult "1"
+	StrCmp $PreviousBackupPresent "1" previous_restore_begin
+	StrCpy $OperationResult "0"
+	Goto previous_restore_done
+	previous_restore_begin:
+	Call RestoreInstalledOwnershipManifest
+	StrCmp $OperationResult "0" 0 previous_restore_failed
+	!insertmacro MementoRestoreFileIfBackedUp "$PLUGINSDIR\memento-previous-files\${APPNAME}.lnk" "$SMPROGRAMS\${APPNAME}.lnk" previous_restore_shortcut_done previous_restore_failed
+
+	StrCmp $RegistryBackupPresent "1" 0 previous_restore_registry_done
+	# A completed removal requires an absent key. If removal failed earlier, an
+	# existing key is still the untouched prior registration and must not be
+	# deleted merely to replay the backup. In either case we never overwrite a
+	# registry key another process created during the transaction.
+	StrCmp $PreviousRemovalCompleted "1" previous_restore_registry_reserve
+	Call RegistryKeyExists
+	StrCmp $OperationResult "0" previous_restore_registry_reserve previous_restore_registry_done
+	previous_restore_registry_reserve:
+	Call ReserveUninstallRegistryKey
+	StrCmp $OperationResult "0" 0 previous_restore_failed
+	ClearErrors
+	ExecWait \
+		'"$SYSDIR\reg.exe" import "$PLUGINSDIR\memento-previous.reg" /reg:64' \
+		$0
+	IfErrors previous_restore_registry_import_failed
+	StrCmp $0 "0" 0 previous_restore_registry_import_failed
+	StrCpy $RegistryOwned "0"
+	Goto previous_restore_registry_done
+	previous_restore_registry_import_failed:
+		# ReserveUninstallRegistryKey proved this transaction created the key, so
+		# it is safe to remove after a failed import.
+		Call DeleteUninstallRegistryKey
+		StrCpy $RegistryOwned "0"
+		Goto previous_restore_failed
+
+	previous_restore_registry_done:
+		!insertmacro MementoRequireFile "$INSTDIR\uninstall.exe" previous_restore_failed
+		!insertmacro MementoRequireFile "$INSTDIR\${INSTALLMARKER}" previous_restore_failed
+		!insertmacro MementoRequireFile "$INSTDIR\${OWNERSHIPMANIFEST}" previous_restore_failed
+		StrCpy $PreviousBackupPresent "0"
+		StrCpy $PreviousRemovalCompleted "0"
+		StrCpy $OperationResult "0"
+		Goto previous_restore_done
+	previous_restore_failed:
+		StrCpy $OperationResult "1"
+	previous_restore_done:
+FunctionEnd
+
+Function RemovePreviousInstallation
+	StrCpy $OperationResult "1"
+	InitPluginsDir
+	ClearErrors
+	CreateDirectory "$PLUGINSDIR\memento-previous"
+	IfErrors previous_remove_done_failed
+	ClearErrors
+	CopyFiles /SILENT /FILESONLY \
+		"$INSTDIR\uninstall.exe" \
+		"$PLUGINSDIR\memento-previous\uninstall.exe"
+	IfErrors previous_remove_done_failed
+	ClearErrors
+	ExecWait '"$PLUGINSDIR\memento-previous\uninstall.exe" /S _?=$INSTDIR' $0
+	IfErrors previous_remove_done_failed
+
+	# A nonzero exit after both control files disappeared means the old
+	# uninstaller reached its registry cleanup. Repair that stale metadata and
+	# continue; all earlier failures retain at least one recovery control file.
+	StrCmp $0 "0" previous_postconditions
+	IfFileExists "$INSTDIR\${INSTALLMARKER}" previous_remove_done_failed
+	IfFileExists "$INSTDIR\uninstall.exe" previous_remove_done_failed
+
+	previous_postconditions:
+		IfFileExists "$INSTDIR\${INSTALLMARKER}" previous_remove_done_failed
+		IfFileExists "$INSTDIR\uninstall.exe" previous_remove_done_failed
+		Call ValidateResidueMarker
+		StrCmp $OperationResult "0" 0 previous_remove_done_failed
+		Call DeleteUninstallRegistryKey
+		StrCmp $OperationResult "0" 0 previous_remove_done_failed
+		!insertmacro MementoDeleteOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" previous_remove_done_failed
+		StrCpy $OperationResult "0"
+		Goto previous_remove_done
+	previous_remove_done_failed:
+		StrCpy $OperationResult "1"
+	previous_remove_done:
+FunctionEnd
+
+Function RemovePartialInstallation
+	# A previous uninstall can leave the validated install marker after deleting
+	# uninstall.exe. Its installed manifest identifies even files that existed
+	# only in an older version; never execute a replacement uninstaller.
+	StrCpy $OperationResult "1"
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\${RESIDUEMARKER}" partial_files_locked
+	!insertmacro MementoCheckOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" partial_files_locked
+
+	SetOutPath "$TEMP"
+	Call RemovePartialOwnedFiles
+	StrCmp $OperationResult "0" 0 partial_remove_failed
+	!insertmacro MementoDeleteOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" partial_remove_failed
+	Call DeleteUninstallRegistryKey
+	StrCmp $OperationResult "0" 0 partial_remove_done
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\${INSTALLMARKER}" partial_remove_failed
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\${OWNERSHIPMANIFEST}" partial_remove_failed
+	StrCpy $OperationResult "0"
+	Goto partial_remove_done
+
+	partial_files_locked:
+	partial_remove_failed:
+		StrCpy $OperationResult "1"
+	partial_remove_done:
+FunctionEnd
+
+Section "install"
+	IfFileExists "$INSTDIR" 0 install_root_valid
+	Push "$INSTDIR"
+	Call ValidateExistingDirectory
+	StrCmp $OperationResult "0" 0 unsafe_directory
+	install_root_valid:
+	# First recover only files named in a validated interrupted-stage manifest.
+	Call CleanStage
+	StrCmp $OperationResult "0" 0 unsafe_stage
+	Call InspectInstallDirectory
+	StrCmp $OperationResult "0" 0 inspect_failed
+
+	# A clean or residual install may merge with unrelated files only when none
+	# of the incoming owned paths or external metadata collide.
+	StrCmp $InstallState "installed" stage_payload
+	StrCmp $InstallState "partial" stage_payload
+	!insertmacro MementoCheckPortableInstallCollisions install_collision
+	!insertmacro MementoCheckInstallCollision "$INSTDIR\logo.ico" install_collision
+	!insertmacro MementoCheckInstallCollision "$INSTDIR\${OWNERSHIPMANIFEST}" install_collision
+	!insertmacro MementoCheckInstallCollision "$INSTDIR\uninstall.exe" install_collision
+	!insertmacro MementoCheckInstallCollision "$INSTDIR\${INSTALLMARKER}" install_collision
+	Call CheckExternalMetadataCollision
+	StrCmp $OperationResult "0" 0 install_collision
+
+	stage_payload:
+		# Extract and prepare every fallible file artifact before removing an old
+		# installation. A failed extraction leaves the old app untouched and a
+		# validated stage that the next run can clean non-recursively.
+		ClearErrors
+		SetOutPath "$INSTDIR\${STAGEDIR}"
+		IfErrors stage_creation_failed
+		!insertmacro MementoWriteMarker "$INSTDIR\${STAGEDIR}\${STAGEMARKER}" "${STAGEMARKERCONTENT}" stage_creation_failed
+		File /r "${MEMENTO_RUNTIME_DIR}\*.*"
+		File /oname=logo.ico "${MEMENTO_LOGO_SOURCE}"
+		File /oname=${OWNERSHIPMANIFEST} "${MEMENTO_OWNERSHIP_MANIFEST_SOURCE}"
+		!insertmacro MementoRequireStagedPortableFiles stage_artifact_failed
+		!insertmacro MementoRequireFile "$INSTDIR\${STAGEDIR}\logo.ico" stage_artifact_failed
+		!insertmacro MementoRequireFile "$INSTDIR\${STAGEDIR}\${OWNERSHIPMANIFEST}" stage_artifact_failed
+		!insertmacro MementoWriteMarker "$INSTDIR\${STAGEDIR}\${INSTALLMARKER}" "${INSTALLMARKERCONTENT}" stage_artifact_failed
+		!insertmacro MementoWriteMarker "$INSTDIR\${STAGEDIR}\${RESIDUEMARKER}" "${RESIDUEMARKERCONTENT}" stage_artifact_failed
+
+		ClearErrors
+		WriteUninstaller "$INSTDIR\${STAGEDIR}\uninstall.exe"
+		IfErrors stage_artifact_failed
+		ClearErrors
+		InitPluginsDir
+		CreateDirectory "$PLUGINSDIR\memento-stage"
+		IfErrors stage_artifact_failed
+		ClearErrors
+		CreateShortcut \
+			"$PLUGINSDIR\memento-stage\${APPNAME}.lnk" \
+			"$INSTDIR\memento.exe" \
+			"" \
+			"$INSTDIR\logo.ico"
+		IfErrors stage_artifact_failed
+		!insertmacro MementoRequireFile "$PLUGINSDIR\memento-stage\${APPNAME}.lnk" stage_artifact_failed
+
+	StrCmp $InstallState "installed" remove_previous
+	StrCmp $InstallState "partial" remove_partial commit_preflight
+	remove_previous:
+		Call BackupPreviousInstallation
+		StrCmp $OperationResult "0" 0 previous_backup_failed
+		Call RemovePreviousInstallation
+		StrCmp $OperationResult "0" 0 previous_install_failed
+		StrCpy $PreviousRemovalCompleted "1"
+		StrCpy $InstallState "residual"
+		StrCpy $ResidueWasPresent "1"
+		Goto commit_preflight
+	remove_partial:
+		Call RemovePartialInstallation
+		StrCmp $OperationResult "0" 0 previous_install_failed
+		StrCpy $InstallState "residual"
+		StrCpy $ResidueWasPresent "1"
+
+	commit_preflight:
+		# Repeat collision checks after staging/removing the old version. Rename
+		# below is non-overwriting, closing the remaining check/use race for files.
+		!insertmacro MementoCheckPortableInstallCollisions install_collision_staged
+		!insertmacro MementoCheckInstallCollision "$INSTDIR\logo.ico" install_collision_staged
+		!insertmacro MementoCheckInstallCollision "$INSTDIR\${OWNERSHIPMANIFEST}" install_collision_staged
+		!insertmacro MementoCheckInstallCollision "$INSTDIR\uninstall.exe" install_collision_staged
+		!insertmacro MementoCheckInstallCollision "$INSTDIR\${INSTALLMARKER}" install_collision_staged
+		Call CheckExternalMetadataCollision
+		StrCmp $OperationResult "0" 0 install_collision_staged
+
+		SetOutPath "$TEMP"
+		!insertmacro MementoCreatePortableDirectories install_commit_failed
+		!insertmacro MementoMoveStagedPortableFiles install_commit_failed
+		!insertmacro MementoMoveStagedFile "$INSTDIR\${STAGEDIR}\logo.ico" "$INSTDIR\logo.ico" install_commit_failed
+		!insertmacro MementoMoveStagedFile "$INSTDIR\${STAGEDIR}\${OWNERSHIPMANIFEST}" "$INSTDIR\${OWNERSHIPMANIFEST}" install_commit_failed
+
+		IfFileExists "$INSTDIR\${RESIDUEMARKER}" residue_already_present
+		!insertmacro MementoMoveStagedFile "$INSTDIR\${STAGEDIR}\${RESIDUEMARKER}" "$INSTDIR\${RESIDUEMARKER}" install_commit_failed
+		Goto residue_committed
+	residue_already_present:
+		!insertmacro MementoDeleteOwnedFile "$INSTDIR\${STAGEDIR}\${RESIDUEMARKER}" install_commit_failed
+	residue_committed:
+		!insertmacro MementoMoveStagedFile "$INSTDIR\${STAGEDIR}\${INSTALLMARKER}" "$INSTDIR\${INSTALLMARKER}" install_commit_failed
+		!insertmacro MementoMoveStagedFile "$INSTDIR\${STAGEDIR}\uninstall.exe" "$INSTDIR\uninstall.exe" install_commit_failed
+		Call ReserveUninstallRegistryKey
+		StrCmp $OperationResult "0" 0 install_commit_failed
+		!insertmacro MementoCopyStagedFileNoOverwrite "$PLUGINSDIR\memento-stage\${APPNAME}.lnk" "$SMPROGRAMS\${APPNAME}.lnk" install_commit_failed
+
+		ClearErrors
+		WriteRegStr HKLM "${UNINSTALLKEY}" "DisplayName" "${APPNAME} - ${DESCRIPTION}"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+		WriteRegStr HKLM "${UNINSTALLKEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "InstallLocation" "$INSTDIR"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "DisplayIcon" "$INSTDIR\logo.ico"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "Publisher" "${COMPANYNAME}"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "HelpLink" "${HELPURL}"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "URLUpdateInfo" "${UPDATEURL}"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "URLInfoAbout" "${ABOUTURL}"
+		WriteRegStr HKLM "${UNINSTALLKEY}" "DisplayVersion" "${DISPLAYVERSION}"
+		WriteRegDWORD HKLM "${UNINSTALLKEY}" "VersionMajor" ${VERSIONMAJOR}
+		WriteRegDWORD HKLM "${UNINSTALLKEY}" "VersionMinor" ${VERSIONMINOR}
+		WriteRegDWORD HKLM "${UNINSTALLKEY}" "NoModify" 1
+		WriteRegDWORD HKLM "${UNINSTALLKEY}" "NoRepair" 1
+		WriteRegDWORD HKLM "${UNINSTALLKEY}" "EstimatedSize" ${INSTALLSIZE}
+		IfErrors install_commit_failed
+
+!ifdef MEMENTO_INSTALLER_TEST_FAILURE
+		Goto install_commit_failed
+!endif
+
+		Call CleanStage
+		StrCmp $OperationResult "0" 0 install_commit_failed
+		StrCpy $PreviousBackupPresent "0"
+		SetErrorLevel 0
+		Goto install_complete
+
+	install_commit_failed:
+		# Missing staged sources are exact per-file commit receipts. Roll back only
+		# destinations this transaction actually created, never every possible
+		# path from the manifest.
+		StrCmp $RegistryOwned "1" 0 rollback_registry_done
+		Call DeleteUninstallRegistryKey
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+		StrCpy $RegistryOwned "0"
+	rollback_registry_done:
+		StrCmp $ShortcutCommitted "1" 0 rollback_shortcut_done
+		!insertmacro MementoDeleteOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" install_rollback_incomplete
+	rollback_shortcut_done:
+		!insertmacro MementoRollbackStagedPortableFiles install_rollback_incomplete
+		!insertmacro MementoRollbackStagedFile "$INSTDIR\${STAGEDIR}\logo.ico" "$INSTDIR\logo.ico" rollback_logo_done install_rollback_incomplete
+		!insertmacro MementoRollbackStagedFile "$INSTDIR\${STAGEDIR}\${OWNERSHIPMANIFEST}" "$INSTDIR\${OWNERSHIPMANIFEST}" rollback_manifest_done install_rollback_incomplete
+		!insertmacro MementoRemovePortableDirectories
+		!insertmacro MementoRollbackStagedFile "$INSTDIR\${STAGEDIR}\uninstall.exe" "$INSTDIR\uninstall.exe" rollback_uninstaller_done install_rollback_incomplete
+		!insertmacro MementoRollbackStagedFile "$INSTDIR\${STAGEDIR}\${INSTALLMARKER}" "$INSTDIR\${INSTALLMARKER}" rollback_install_marker_done install_rollback_incomplete
+		StrCmp $ResidueWasPresent "1" rollback_keep_residue
+		!insertmacro MementoRollbackStagedFile "$INSTDIR\${STAGEDIR}\${RESIDUEMARKER}" "$INSTDIR\${RESIDUEMARKER}" rollback_keep_residue install_rollback_incomplete
+		Call RestorePreviousInstallation
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+		Call CleanStage
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+		RMDir "$INSTDIR"
+		!insertmacro MementoFatal "Setup could not complete. All newly installed files were rolled back; existing user files were preserved."
+
+	install_rollback_incomplete:
+		!insertmacro MementoFatal "Setup could not complete and Windows blocked part of the rollback. The ownership markers and uninstaller were preserved wherever possible; close programs using this folder and run setup or uninstall again."
+
+	stage_creation_failed:
+		SetOutPath "$TEMP"
+		Delete "$INSTDIR\${STAGEDIR}\${STAGEMARKER}"
+		RMDir "$INSTDIR\${STAGEDIR}"
+		RMDir "$INSTDIR"
+		!insertmacro MementoFatal "Setup could not create its protected staging directory. No existing installation was changed."
+
+	stage_artifact_failed:
+		Call CleanStage
+		RMDir "$INSTDIR"
+		!insertmacro MementoFatal "Setup could not prepare the new application files. No existing installation was changed."
+
+	previous_install_failed:
+		Call RestorePreviousInstallation
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+		Call CleanStage
+		!insertmacro MementoFatal "The previous installation could not be removed safely. Close Memento and any program using its files, then try again."
+
+	previous_backup_failed:
+		Call CleanStage
+		!insertmacro MementoFatal "Setup could not create a rollback copy of the installed application. The existing installation was not changed."
+
+	install_collision_staged:
+		StrCmp $PreviousBackupPresent "1" 0 install_collision_cleanup
+		Call RestorePreviousInstallation
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+	install_collision_cleanup:
+		Call CleanStage
+		StrCmp $OperationResult "0" 0 install_rollback_incomplete
+	install_collision:
+		!insertmacro MementoFatal "Setup found an existing file or system entry that it does not own. No unknown file was overwritten."
+
+	unsafe_stage:
+		!insertmacro MementoFatal "Setup found unexpected content in its staging directory. No unknown file was removed."
+
+	inspect_failed:
+		StrCmp $OperationResult "2" unsafe_directory invalid_installation
+	unsafe_directory:
+		!insertmacro MementoFatal "Setup found files in the installation directory without a valid ownership marker. No files were changed."
+	invalid_installation:
+		!insertmacro MementoFatal "Setup found invalid installation ownership metadata. No unknown file was changed."
+
+	install_complete:
+SectionEnd
+
+# Uninstaller
+
+Function un.ValidateResidueMarker
+	StrCpy $OperationResult "1"
+	ClearErrors
+	FileOpen $0 "$INSTDIR\${RESIDUEMARKER}" r
+	IfErrors un_residue_validation_done
+	FileRead $0 $1
+	StrCpy $2 ""
+	FileRead $0 $2
+	FileClose $0
+	StrCmp $2 "" 0 un_residue_validation_done
+	ClearErrors
+	StrCmp $1 "${RESIDUEMARKERCONTENT}$\r$\n" un_residue_validation_valid
+	StrCmp $1 "${RESIDUEMARKERCONTENT}$\n" un_residue_validation_valid un_residue_validation_done
+	un_residue_validation_valid:
+		StrCpy $OperationResult "0"
+	un_residue_validation_done:
+FunctionEnd
+
+Function un.ValidateExistingDirectory
+	Exch $0
+	Push $1
+	Push $2
+	StrCpy $OperationResult "1"
+	System::Call 'kernel32::GetFileAttributesW(w r0) i .r1'
+	IntCmp $1 -1 un_existing_directory_done un_existing_directory_bits un_existing_directory_bits
+	un_existing_directory_bits:
+		IntOp $2 $1 & 16
+		IntCmp $2 0 un_existing_directory_done un_existing_directory_reparse un_existing_directory_reparse
+	un_existing_directory_reparse:
+		IntOp $2 $1 & 1024
+		IntCmp $2 0 un_existing_directory_valid un_existing_directory_done un_existing_directory_done
+	un_existing_directory_valid:
+		StrCpy $OperationResult "0"
+	un_existing_directory_done:
+		Pop $2
+		Pop $1
+		Pop $0
+FunctionEnd
+
+Function un.RegistryKeyExists
+	StrCpy $OperationResult "1"
+	System::Call \
+		'advapi32::RegOpenKeyExW(p 0x80000002, w "${UNINSTALLKEY}", i 0, i 0x20119, *p .r0) i .r1'
+	StrCmp $1 "0" un_registry_key_opened
+	StrCmp $1 "2" un_registry_key_absent
+	StrCmp $1 "3" un_registry_key_absent un_registry_key_done
+	un_registry_key_opened:
+		System::Call 'advapi32::RegCloseKey(p r0)'
+		Goto un_registry_key_done
+	un_registry_key_absent:
+		StrCpy $OperationResult "0"
+	un_registry_key_done:
+FunctionEnd
+
+Function un.DeleteUninstallRegistryKey
+	ClearErrors
+	DeleteRegKey HKLM "${UNINSTALLKEY}"
+	Call un.RegistryKeyExists
+FunctionEnd
+
+Function un.HasResidualContent
+	# Assume content remains until a successful enumeration proves the residue
+	# marker is the only entry. An access error must preserve that marker.
+	StrCpy $OperationResult "1"
+	ClearErrors
+	FindFirst $0 $1 "$INSTDIR\*.*"
+	IfErrors un_residual_scan_done
+	StrCpy $OperationResult "0"
+	un_residual_scan_loop:
+		StrCmp $1 "" un_residual_scan_close
+		StrCmp $1 "." un_residual_scan_next
+		StrCmp $1 ".." un_residual_scan_next
+		StrCmp $1 "${RESIDUEMARKER}" un_residual_scan_next
+		StrCpy $OperationResult "1"
+		Goto un_residual_scan_close
+	un_residual_scan_next:
+		ClearErrors
+		FindNext $0 $1
+		IfErrors un_residual_scan_close
+		Goto un_residual_scan_loop
+	un_residual_scan_close:
+		FindClose $0
+	un_residual_scan_done:
+FunctionEnd
+
+Function un.onInit
+	SetShellVarContext all
+	SetRegView 64
+	StrCmp "$INSTDIR" "$PROGRAMFILES64\${APPNAME}" un_path_ok
+		!insertmacro MementoFatal "Safety check failed: this uninstaller is not running from the expected installation directory."
+
+	un_path_ok:
+		Push "$INSTDIR"
+		Call un.ValidateExistingDirectory
+		StrCmp $OperationResult "0" 0 un_invalid_directory
+		Call un.ValidateResidueMarker
+		StrCmp $OperationResult "0" 0 un_invalid_marker
+		IfFileExists "$INSTDIR\${INSTALLMARKER}" 0 un_invalid_marker
+		ClearErrors
+		FileOpen $0 "$INSTDIR\${INSTALLMARKER}" r
+		IfErrors un_invalid_marker
+		FileRead $0 $1
+		StrCpy $2 ""
+		FileRead $0 $2
+		FileClose $0
+		StrCmp $2 "" 0 un_invalid_marker
+		ClearErrors
+		StrCmp $1 "${INSTALLMARKERCONTENT}$\r$\n" un_marker_ok
+		StrCmp $1 "${INSTALLMARKERCONTENT}$\n" un_marker_ok un_invalid_marker
+
+	un_invalid_marker:
+		!insertmacro MementoFatal "Safety check failed: the installation ownership markers are missing or invalid."
+	un_invalid_directory:
+		!insertmacro MementoFatal "Safety check failed: the installation directory is missing or is a reparse point."
+	un_marker_ok:
+		IfSilent un_confirmed
+		MessageBox MB_OKCANCEL "Permanently remove ${APPNAME}?" IDOK un_confirmed
+		Abort
+	un_confirmed:
+FunctionEnd
+
+Section "uninstall"
+	SetErrorLevel 0
+	!insertmacro MementoValidateUninstallPortableDirectories uninstall_files_locked
+	!insertmacro MementoCheckPortableFiles uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\logo.ico" uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\${OWNERSHIPMANIFEST}" uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\uninstall.exe" uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\${INSTALLMARKER}" uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$INSTDIR\${RESIDUEMARKER}" uninstall_files_locked
+	!insertmacro MementoCheckOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" uninstall_files_locked
+
+	SetOutPath "$TEMP"
+	!insertmacro MementoDeletePortableFiles uninstall_failed
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\logo.ico" uninstall_failed
+	!insertmacro MementoDeleteOwnedFile "$SMPROGRAMS\${APPNAME}.lnk" uninstall_failed
+	!insertmacro MementoRemovePortableDirectories
+
+	# Keep both recovery controls until registry cleanup succeeds. Missing registry
+	# state is already the desired result and is not an uninstall failure.
+	Call un.DeleteUninstallRegistryKey
+	StrCmp $OperationResult "0" 0 uninstall_registry_failed
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\${OWNERSHIPMANIFEST}" uninstall_failed
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\uninstall.exe" uninstall_failed
+	!insertmacro MementoDeleteOwnedFile "$INSTDIR\${INSTALLMARKER}" uninstall_failed
+
+	Call un.HasResidualContent
+	StrCmp $OperationResult "1" uninstall_complete
+	ClearErrors
+	Delete "$INSTDIR\${RESIDUEMARKER}"
+	IfErrors uninstall_failed
+	ClearErrors
+	RMDir "$INSTDIR"
+	IfErrors recreate_residue
+	Goto uninstall_complete
+
+	recreate_residue:
+		# A file appeared after the residual scan. Restore the ownership marker and
+		# leave the unknown content untouched.
+		!insertmacro MementoWriteMarker "$INSTDIR\${RESIDUEMARKER}" "${RESIDUEMARKERCONTENT}" uninstall_failed
+		Goto uninstall_complete
+
+	uninstall_files_locked:
+		!insertmacro MementoFatal "Memento or one of its runtime files is in use. No files were removed; close the application and try again."
+	uninstall_failed:
+		!insertmacro MementoFatal "An installed file could not be removed. Recovery ownership metadata was preserved so removal can be retried."
+	uninstall_registry_failed:
+		!insertmacro MementoFatal "The application files were removed, but Windows blocked removal of the uninstall registration. The uninstaller was preserved so removal can be retried."
+	uninstall_complete:
+		SetErrorLevel 0
+SectionEnd

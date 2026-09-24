@@ -1,0 +1,104 @@
+add_library(
+    clipboard
+    clipboard.cpp
+    clipboard.h
+)
+target_compile_features(clipboard PRIVATE cxx_std_20)
+target_include_directories(clipboard PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(clipboard PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    clipboard
+    PRIVATE Qt6::Gui
+    PUBLIC Qt6::Core
+)
+
+add_library(
+    coloredsvgprovider
+    coloredsvgprovider.cpp
+    coloredsvgprovider.h
+)
+target_compile_features(coloredsvgprovider PRIVATE cxx_std_20)
+target_include_directories(coloredsvgprovider PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(coloredsvgprovider PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    coloredsvgprovider
+    PRIVATE Qt6::Gui
+    PRIVATE Qt6::Svg
+    PUBLIC Qt6::Quick
+)
+
+add_library(
+    fileopenhandler
+    fileopenhandler.cpp
+    fileopenhandler.h
+)
+target_compile_features(fileopenhandler PRIVATE cxx_std_20)
+target_include_directories(fileopenhandler PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(fileopenhandler PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    fileopenhandler
+    PRIVATE Qt6::Gui
+    PUBLIC Qt6::Core
+)
+
+add_library(
+    features
+    features.cpp
+    features.h
+)
+
+add_library(
+    episodefolder
+    episodefolder.cpp
+    episodefolder.h
+    torrentengine.cpp
+    torrentengine.h
+)
+find_package(LibtorrentRasterbar 2.0 REQUIRED CONFIG)
+target_compile_features(episodefolder PRIVATE cxx_std_20)
+target_include_directories(episodefolder PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(episodefolder PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    episodefolder
+    PRIVATE LibtorrentRasterbar::torrent-rasterbar
+    PRIVATE Qt6::Network
+    PRIVATE utils
+    PUBLIC Qt6::Core
+)
+target_compile_features(features PRIVATE cxx_std_20)
+target_include_directories(features PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(features PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    features
+    PRIVATE version
+    PUBLIC Qt6::Core
+)
+
+add_library(
+    keytracker
+    keytracker.cpp
+    keytracker.h
+)
+target_compile_features(keytracker PRIVATE cxx_std_20)
+target_include_directories(keytracker PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(keytracker PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    keytracker
+    PRIVATE Qt6::Gui
+    PUBLIC Qt6::Core
+)
+
+
+add_library(
+    quickpaths
+    paths.cpp
+    paths.h
+)
+target_compile_features(quickpaths PRIVATE cxx_std_20)
+target_include_directories(quickpaths PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(quickpaths PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(
+    quickpaths
+    PUBLIC Qt6::Core
+    PUBLIC utils
+)

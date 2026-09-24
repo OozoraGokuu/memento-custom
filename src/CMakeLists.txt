@@ -1,0 +1,369 @@
+# Add subdirectories
+add_subdirectory(anilist)
+add_subdirectory(anki)
+add_subdirectory(audio)
+add_subdirectory(constant)
+add_subdirectory(definition)
+add_subdirectory(dict)
+add_subdirectory(jimaku)
+add_subdirectory(manager)
+add_subdirectory(migaku)
+add_subdirectory(torrentsearch)
+add_subdirectory(ocr)
+add_subdirectory(os)
+add_subdirectory(player)
+add_subdirectory(quick)
+add_subdirectory(setting)
+add_subdirectory(state)
+add_subdirectory(subtitle)
+add_subdirectory(util)
+
+# Executable Targets
+qt_add_executable(
+    memento
+    main.cpp
+    releasecheck.cpp
+    releasecheck.h
+)
+if(WIN32)
+    target_sources(
+        memento
+        PRIVATE "${PROJECT_SOURCE_DIR}/res/appicon.rc"
+    )
+endif()
+if(APPLE AND MEMENTO_BUNDLE)
+    target_sources(
+        memento
+        PRIVATE ${PROJECT_SOURCE_DIR}/res/memento.icns
+    )
+    set_source_files_properties(
+        "${PROJECT_SOURCE_DIR}/res/memento.icns"
+        PROPERTIES MACOSX_PACKAGE_LOCATION "Resources"
+    )
+endif()
+set_source_files_properties(
+    qml/objects/AudioSourceResolver.qml
+    qml/util/AnkiMarkers.qml
+    qml/util/MementoPalette.qml
+    qml/util/Utils.qml
+    PROPERTIES
+        QT_QML_SINGLETON_TYPE TRUE
+)
+qt_add_qml_module(
+    memento
+    URI Ripose.Memento
+    VERSION 1.0
+    QML_FILES
+        qml/controls/ActivityPanel.qml
+        qml/controls/AnkiFieldTextArea.qml
+        qml/controls/AnkiMarkerDescription.qml
+        qml/controls/AnkiNoteBox.qml
+        qml/controls/CenteredFlow.qml
+        qml/controls/KeybindCommand.qml
+        qml/controls/LibraryPage.qml
+        qml/controls/ManualSearchPage.qml
+        qml/controls/Player.qml
+        qml/controls/PlayerControls.qml
+        qml/controls/PlayerMenu.qml
+        qml/controls/PlayerOcrOverlay.qml
+        qml/controls/PlayerSlider.qml
+        qml/controls/PlayerThumbnail.qml
+        qml/controls/SearchableText.qml
+        qml/controls/SelectableLabel.qml
+        qml/controls/SettingsBox.qml
+        qml/controls/SettingsBoxSeparator.qml
+        qml/controls/SideBarList.qml
+        qml/controls/StrokeLabel.qml
+        qml/controls/SubtitleList.qml
+        qml/controls/SubtitleListPage.qml
+        qml/controls/SubtitleListTabButton.qml
+        qml/controls/SubtitleText.qml
+        qml/definition/DefinitionList.qml
+        qml/definition/DefinitionPage.qml
+        qml/definition/DefinitionPopup.qml
+        qml/definition/DictionaryLabel.qml
+        qml/definition/ExpressionLabel.qml
+        qml/definition/FrequencyLabel.qml
+        qml/definition/GlossaryText.qml
+        qml/definition/KanjiEntry.qml
+        qml/definition/KanjiValueTag.qml
+        qml/definition/MetaLabel.qml
+        qml/definition/TagLabel.qml
+        qml/definition/TermEntry.qml
+        qml/definition/TermGlossary.qml
+        qml/definition/TermPitch.qml
+        qml/dialogs/JimakuSearchDialog.qml
+        qml/dialogs/TorrentSearchDialog.qml
+        qml/dialogs/UpdateDialog.qml
+        qml/Main.qml
+        qml/objects/AudioFiles.qml
+        qml/objects/AudioSourceResolver.qml
+        qml/objects/CursorTimer.qml
+        qml/objects/MoveTimer.qml
+        qml/options/AnkiIntegrationHelpWindow.qml
+        qml/options/AnkiIntegrationPage.qml
+        qml/options/ApplicationPage.qml
+        qml/options/AudioSourcesPage.qml
+        qml/options/BehaviorPage.qml
+        qml/options/DictionaryPage.qml
+        qml/options/InterfacePage.qml
+        qml/options/AniListIntegrationPage.qml
+        qml/options/MigakuIntegrationPage.qml
+        qml/options/AniListMappingPane.qml
+        qml/options/JimakuIntegrationPage.qml
+        qml/options/KeybindsPage.qml
+        qml/options/OcrPage.qml
+        qml/options/OptionsWindow.qml
+        qml/options/SearchPage.qml
+        qml/util/AnkiMarkers.qml
+        qml/util/MementoPalette.qml
+        qml/util/Utils.qml
+        qml/windows/AboutWindow.qml
+)
+target_compile_features(memento PRIVATE cxx_std_20)
+target_include_directories(memento PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(memento PRIVATE ${MEMENTO_COMPILER_FLAGS})
+if(MEMENTO_BUNDLE)
+    set(MEMENTO_OUTPUT_NAME Memento)
+else()
+    set(MEMENTO_OUTPUT_NAME memento)
+endif()
+set_target_properties(
+    memento PROPERTIES
+    OUTPUT_NAME "${MEMENTO_OUTPUT_NAME}"
+    MACOSX_BUNDLE_BUNDLE_NAME Memento
+    MACOSX_BUNDLE_GUI_IDENTIFIER io.github.mu0dev.memento-study-edition
+    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+    MACOSX_BUNDLE ${MEMENTO_BUNDLE}
+    MACOSX_BUNDLE_ICON_FILE memento.icns
+    WIN32_EXECUTABLE ${MEMENTO_WIN32_EXECUTABLE}
+)
+if(APPLE AND MEMENTO_BUNDLE)
+    set_target_properties(
+        memento PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST
+            "${PROJECT_SOURCE_DIR}/cmake/MacOSBundleInfo.plist.in"
+    )
+endif()
+target_link_libraries(
+    memento
+    PRIVATE "$<$<BOOL:${MEMENTO_QAPPLICATION}>:Qt6::Widgets>"
+    PRIVATE "$<$<BOOL:${MEMENTO_SYSTEM_QCORO}>:QCoro::Qml>"
+    PRIVATE "$<$<NOT:$<BOOL:${MEMENTO_SYSTEM_QCORO}>>:QCoro6Qml>"
+    PRIVATE anki
+    PRIVATE audioplayer
+    PRIVATE clipboard
+    PRIVATE coloredsvgprovider
+    PRIVATE definition
+    PRIVATE dictionary
+    PRIVATE episodefolder
+    PRIVATE features
+    PRIVATE keytracker
+    PRIVATE jimaku
+    PRIVATE managers
+    PRIVATE migaku
+    PRIVATE torrentsearch
+    PRIVATE mpvplayer
+    PRIVATE ocr
+    PRIVATE Qt6::Quick
+    PRIVATE Qt6::QuickControls2
+    PRIVATE Qt6::Svg
+    PRIVATE quickpaths
+    PRIVATE screensaver
+    PRIVATE settings
+    PRIVATE subtitle
+    PRIVATE utils
+)
+set(
+    MEMENTO_TRANSLATION_TS_FILES
+    translations/memento_ko.ts
+    translations/memento_zh_CN.ts
+    translations/memento_zh_TW.ts
+)
+qt_add_lupdate(
+    SOURCE_TARGETS
+        dictionary # required due to static tr() calls
+        memento
+    TS_FILES ${MEMENTO_TRANSLATION_TS_FILES}
+    OPTIONS -extensions qml,cpp,h
+)
+qt_add_lrelease(
+    memento
+    TS_FILES ${MEMENTO_TRANSLATION_TS_FILES}
+    QM_FILES_OUTPUT_VARIABLE MEMENTO_TRANSLATION_QM_FILES
+)
+if(APPLE AND MEMENTO_BUNDLE)
+    # Bundled translations belong in Contents/Resources and are copied by
+    # CopyTranslationsMacOS.cmake after the application bundle is created.
+    add_dependencies(memento Memento_lrelease)
+else()
+    add_custom_target(
+        memento_copy_translations ALL
+        COMMAND
+            "${CMAKE_COMMAND}" -E make_directory
+            "$<TARGET_FILE_DIR:memento>/translations"
+        COMMAND
+            "${CMAKE_COMMAND}" -E copy_if_different
+            ${MEMENTO_TRANSLATION_QM_FILES}
+            "$<TARGET_FILE_DIR:memento>/translations"
+        DEPENDS ${MEMENTO_TRANSLATION_QM_FILES}
+        VERBATIM
+    )
+    add_dependencies(memento memento_copy_translations)
+endif()
+
+include(GNUInstallDirs)
+install(
+    FILES "${PROJECT_SOURCE_DIR}/LICENSE"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/memento-custom
+)
+install(
+    TARGETS memento
+    BUNDLE DESTINATION .
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(
+    FILES ${MEMENTO_TRANSLATION_QM_FILES}
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/memento/translations
+)
+if(UNIX AND NOT APPLE)
+	install(
+		FILES "${PROJECT_SOURCE_DIR}/res/memento.desktop"
+		DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+	)
+	install(
+		FILES "${PROJECT_SOURCE_DIR}/res/memento.svg"
+		DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+	)
+endif()
+
+if(APPLE AND MEMENTO_BUNDLE)
+    # BundleUtilities walks the actual linked dependency graph from the bundle.
+    # These directories are only search hints so it can resolve @rpath entries
+    # back to the exact libraries CMake found on this machine.
+    set(
+        MEMENTO_BUNDLE_LIBRARY_HINTS
+        "${JsonC_LIBRARY}"
+        "${libzip_LIBRARY}"
+        "${mpv_LIBRARY}"
+    )
+    if(MEMENTO_MECAB_SUPPORT)
+        list(APPEND MEMENTO_BUNDLE_LIBRARY_HINTS "${MeCab_LIBRARY}")
+    endif()
+    if(MEMENTO_OCR_SUPPORT AND MEMENTO_SYSTEM_MOCR)
+        list(APPEND MEMENTO_BUNDLE_LIBRARY_HINTS "${mocr_LIBRARY}" "${mocrxx_LIBRARY}")
+    endif()
+    list(REMOVE_DUPLICATES MEMENTO_BUNDLE_LIBRARY_HINTS)
+
+    set(MEMENTO_BUNDLE_LIBRARY_DIRS "")
+    foreach(MEMENTO_BUNDLE_LIBRARY_HINT IN LISTS MEMENTO_BUNDLE_LIBRARY_HINTS)
+        get_filename_component(
+            MEMENTO_BUNDLE_LIBRARY_DIR "${MEMENTO_BUNDLE_LIBRARY_HINT}" DIRECTORY
+        )
+        list(APPEND MEMENTO_BUNDLE_LIBRARY_DIRS "${MEMENTO_BUNDLE_LIBRARY_DIR}")
+    endforeach()
+
+    # BundleUtilities must also be able to resolve the @rpath-based Qt
+    # framework names that macdeployqt places in the bundle.  The application
+    # does not link Qt using plain dylib paths, so those directories are not
+    # represented by the third-party library hints above.
+    get_target_property(
+        MEMENTO_QT_CORE_LOCATION Qt6::Core IMPORTED_LOCATION_RELEASE
+    )
+    if(NOT MEMENTO_QT_CORE_LOCATION)
+        get_target_property(
+            MEMENTO_QT_CORE_LOCATION Qt6::Core IMPORTED_LOCATION
+        )
+    endif()
+    if(MEMENTO_QT_CORE_LOCATION)
+        string(
+            REGEX REPLACE "/QtCore\\.framework/.*$" ""
+            MEMENTO_QT_FRAMEWORK_DIR "${MEMENTO_QT_CORE_LOCATION}"
+        )
+        list(APPEND MEMENTO_BUNDLE_LIBRARY_DIRS "${MEMENTO_QT_FRAMEWORK_DIR}")
+    endif()
+    list(REMOVE_DUPLICATES MEMENTO_BUNDLE_LIBRARY_DIRS)
+
+    # On macOS, use macdeployqt directly.  It is the native Qt deployment tool
+    # for bundles and, unlike the generic install helper, copies QML plugins
+    # into their final bundle layout instead of relying on staging symlinks.
+    find_program(MEMENTO_MACDEPLOYQT_EXECUTABLE macdeployqt REQUIRED)
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/DeployQtMacOS.cmake.in"
+        "${PROJECT_BINARY_DIR}/DeployQtMacOS.cmake"
+        @ONLY
+    )
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/BundleMacOS.cmake.in"
+        "${PROJECT_BINARY_DIR}/BundleMacOS.cmake"
+        @ONLY
+    )
+    install(SCRIPT "${PROJECT_BINARY_DIR}/BundleMacOS.cmake")
+    install(SCRIPT "${PROJECT_BINARY_DIR}/DeployQtMacOS.cmake")
+
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/CopyTranslationsMacOS.cmake.in"
+        "${PROJECT_BINARY_DIR}/CopyTranslationsMacOS.cmake"
+        @ONLY
+    )
+    install(SCRIPT "${PROJECT_BINARY_DIR}/CopyTranslationsMacOS.cmake")
+
+    if(MEMENTO_MECAB_SUPPORT)
+        configure_file(
+            "${PROJECT_SOURCE_DIR}/cmake/CopyMeCabDictionaryMacOS.cmake.in"
+            "${PROJECT_BINARY_DIR}/CopyMeCabDictionaryMacOS.cmake"
+            @ONLY
+        )
+        install(SCRIPT "${PROJECT_BINARY_DIR}/CopyMeCabDictionaryMacOS.cmake")
+    endif()
+
+    add_custom_target(
+        memento_bundle
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+            -P "${PROJECT_BINARY_DIR}/BundleMacOS.cmake"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+            -P "${PROJECT_BINARY_DIR}/DeployQtMacOS.cmake"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+            -P "${PROJECT_BINARY_DIR}/CopyTranslationsMacOS.cmake"
+        DEPENDS memento
+        COMMENT "Bundling dependencies into Memento.app"
+        VERBATIM
+    )
+    if(MEMENTO_MECAB_SUPPORT)
+        add_custom_command(
+            TARGET memento_bundle
+            POST_BUILD
+            COMMAND
+                "${CMAKE_COMMAND}"
+                -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+                -P "${PROJECT_BINARY_DIR}/CopyMeCabDictionaryMacOS.cmake"
+            VERBATIM
+        )
+    endif()
+
+    if(MEMENTO_CODESIGN_IDENTITY)
+        configure_file(
+            "${PROJECT_SOURCE_DIR}/cmake/SignMacOS.cmake.in"
+            "${PROJECT_BINARY_DIR}/SignMacOS.cmake"
+            @ONLY
+        )
+        install(SCRIPT "${PROJECT_BINARY_DIR}/SignMacOS.cmake")
+        add_custom_command(
+            TARGET memento_bundle
+            POST_BUILD
+            COMMAND
+                "${CMAKE_COMMAND}"
+                -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+                -P "${PROJECT_BINARY_DIR}/SignMacOS.cmake"
+            VERBATIM
+        )
+    endif()
+endif()

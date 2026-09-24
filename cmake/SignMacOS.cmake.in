@@ -1,0 +1,122 @@
+if(NOT DEFINED MEMENTO_BUNDLE_PATH)
+    set(MEMENTO_BUNDLE_PATH "${CMAKE_INSTALL_PREFIX}/Memento.app")
+endif()
+set(MEMENTO_CODESIGN_IDENTITY "@MEMENTO_CODESIGN_IDENTITY@")
+set(MEMENTO_CODESIGN_KEYCHAIN "@MEMENTO_CODESIGN_KEYCHAIN@")
+set(MEMENTO_CODESIGN_DISTRIBUTION "@MEMENTO_CODESIGN_DISTRIBUTION@")
+
+set(
+    MEMENTO_CODESIGN_COMMAND
+    /usr/bin/codesign
+    --force
+)
+if(MEMENTO_CODESIGN_KEYCHAIN)
+    list(APPEND
+        MEMENTO_CODESIGN_COMMAND
+        --keychain "${MEMENTO_CODESIGN_KEYCHAIN}"
+    )
+endif()
+list(APPEND
+    MEMENTO_CODESIGN_COMMAND
+    --sign "${MEMENTO_CODESIGN_IDENTITY}"
+)
+if(MEMENTO_CODESIGN_DISTRIBUTION)
+    if(MEMENTO_CODESIGN_IDENTITY STREQUAL "-")
+        message(FATAL_ERROR
+            "Distribution signing requires a non-ad-hoc signing identity."
+        )
+    endif()
+    list(APPEND MEMENTO_CODESIGN_COMMAND --options runtime --timestamp)
+endif()
+
+if(NOT EXISTS "${MEMENTO_BUNDLE_PATH}")
+    message(FATAL_ERROR
+        "Cannot sign app bundle: ${MEMENTO_BUNDLE_PATH} does not exist."
+    )
+endif()
+
+file(GLOB_RECURSE MEMENTO_CONTENT_ITEMS
+    LIST_DIRECTORIES true
+    "${MEMENTO_BUNDLE_PATH}/Contents/*"
+)
+
+# Sign every Mach-O leaf, including QML plugins and helper executables outside
+# the conventional Frameworks/PlugIns directories.
+set(MEMENTO_MACHO_ITEMS "")
+set(MEMENTO_NESTED_BUNDLES "")
+foreach(MEMENTO_CODE_ITEM IN LISTS MEMENTO_CONTENT_ITEMS)
+    if(IS_SYMLINK "${MEMENTO_CODE_ITEM}")
+        continue()
+    endif()
+
+    if(IS_DIRECTORY "${MEMENTO_CODE_ITEM}")
+        if(MEMENTO_CODE_ITEM MATCHES "\\.(framework|app|xpc|appex)$")
+            list(APPEND MEMENTO_NESTED_BUNDLES "${MEMENTO_CODE_ITEM}")
+        endif()
+        continue()
+    endif()
+
+    execute_process(
+        COMMAND /usr/bin/file -b "${MEMENTO_CODE_ITEM}"
+        RESULT_VARIABLE MEMENTO_FILE_RESULT
+        OUTPUT_VARIABLE MEMENTO_FILE_DESCRIPTION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT MEMENTO_FILE_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Could not inspect potential code item: ${MEMENTO_CODE_ITEM}"
+        )
+    endif()
+    if(MEMENTO_FILE_DESCRIPTION MATCHES "Mach-O")
+        list(APPEND MEMENTO_MACHO_ITEMS "${MEMENTO_CODE_ITEM}")
+    endif()
+endforeach()
+
+# Descending path order signs deeper children before their enclosing bundle.
+list(REMOVE_DUPLICATES MEMENTO_MACHO_ITEMS)
+list(REMOVE_DUPLICATES MEMENTO_NESTED_BUNDLES)
+list(SORT MEMENTO_MACHO_ITEMS ORDER DESCENDING)
+list(SORT MEMENTO_NESTED_BUNDLES ORDER DESCENDING)
+
+foreach(MEMENTO_CODE_ITEM IN LISTS MEMENTO_MACHO_ITEMS)
+    execute_process(
+        COMMAND ${MEMENTO_CODESIGN_COMMAND} "${MEMENTO_CODE_ITEM}"
+        RESULT_VARIABLE MEMENTO_CODESIGN_RESULT
+    )
+    if(NOT MEMENTO_CODESIGN_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to sign nested code item: ${MEMENTO_CODE_ITEM}"
+        )
+    endif()
+endforeach()
+
+foreach(MEMENTO_CODE_ITEM IN LISTS MEMENTO_NESTED_BUNDLES)
+    execute_process(
+        COMMAND ${MEMENTO_CODESIGN_COMMAND} "${MEMENTO_CODE_ITEM}"
+        RESULT_VARIABLE MEMENTO_CODESIGN_RESULT
+    )
+    if(NOT MEMENTO_CODESIGN_RESULT EQUAL 0)
+        message(FATAL_ERROR
+            "Failed to sign nested bundle: ${MEMENTO_CODE_ITEM}"
+        )
+    endif()
+endforeach()
+
+execute_process(
+    COMMAND ${MEMENTO_CODESIGN_COMMAND} "${MEMENTO_BUNDLE_PATH}"
+    RESULT_VARIABLE MEMENTO_CODESIGN_RESULT
+)
+if(NOT MEMENTO_CODESIGN_RESULT EQUAL 0)
+    message(FATAL_ERROR "Failed to sign app bundle: ${MEMENTO_BUNDLE_PATH}")
+endif()
+
+execute_process(
+    COMMAND /usr/bin/codesign --verify --deep --strict --verbose=2
+        "${MEMENTO_BUNDLE_PATH}"
+    RESULT_VARIABLE MEMENTO_CODESIGN_VERIFY_RESULT
+)
+if(NOT MEMENTO_CODESIGN_VERIFY_RESULT EQUAL 0)
+    message(FATAL_ERROR
+        "Signed app bundle failed verification: ${MEMENTO_BUNDLE_PATH}"
+    )
+endif()

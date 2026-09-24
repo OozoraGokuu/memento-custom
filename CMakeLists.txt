@@ -1,0 +1,159 @@
+cmake_minimum_required(VERSION 3.16)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" AND
+   NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+	set(
+		CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING
+		"Minimum supported macOS version" FORCE
+	)
+endif()
+
+project(
+    Memento
+    VERSION 2.3.0
+    DESCRIPTION "Memento Study Edition, an mpv-based Japanese study player"
+	HOMEPAGE_URL "https://github.com/mu0dev/memento-custom"
+    LANGUAGES C CXX
+)
+
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
+# Set the default build type
+set(default_build_type "RelWithDebInfo")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+	message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
+	set(
+		CMAKE_BUILD_TYPE "${default_build_type}" CACHE
+    	STRING "Choose the type of build." FORCE
+	)
+  	# Set the possible values of build type for cmake-gui
+  	set_property(
+		CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    	"Debug" "Release" "MinSizeRel" "RelWithDebInfo"
+	)
+endif()
+
+# Require out-of-source builds
+file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
+if(EXISTS "${LOC_PATH}")
+    message(FATAL_ERROR "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please make a build subdirectory. Feel free to remove CMakeCache.txt and CMakeFiles.")
+endif()
+
+add_subdirectory(option)
+
+# Check that dangerous options have no been toggled
+if(NOT APPLE AND MEMENTO_BUNDLE)
+	message(FATAL_ERROR "You cannot set the MEMENTO_BUNDLE option to ON on non-Apple platforms.")
+endif()
+
+# Set the module path
+set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
+# Make IDEs understand the code better
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+# Set Compiler Flags
+list(
+	APPEND
+	MEMENTO_COMPILER_FLAGS
+	"-Wall"
+	"-Wextra"
+	"-Wpedantic"
+	"$<$<BOOL:${MEMENTO_BUNDLE}>:-DMEMENTO_BUNDLE=1>"
+	"$<$<BOOL:${MEMENTO_ASAN}>:-fsanitize=address>"
+	"$<$<BOOL:${MEMENTO_MECAB_SUPPORT}>:-DMEMENTO_MECAB_SUPPORT=1>"
+	"$<$<BOOL:${MEMENTO_OCR_SUPPORT}>:-DMEMENTO_OCR_SUPPORT=1>"
+	"$<$<BOOL:${MEMENTO_QAPPLICATION}>:-DMEMENTO_QAPPLICATION=1>"
+	"$<$<BOOL:${MEMENTO_SYSTEM_QCORO}>:-DMEMENTO_SYSTEM_QCORO=1>"
+	"$<$<BOOL:${MEMENTO_WERROR}>:-Werror>"
+)
+if(MEMENTO_ASAN)
+	add_link_options(-fsanitize=address)
+endif()
+
+# Get the Git version hash
+if(NOT MEMENTO_RELEASE_BUILD)
+	find_package(Git QUIET)
+
+	if(GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+		execute_process(
+			COMMAND ${GIT_EXECUTABLE} log --pretty=format:%h -n 1
+			WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+			OUTPUT_VARIABLE MEMENTO_VERSION_HASH
+		)
+	endif()
+endif()
+
+# Set the proper variables for macOS cross compilation
+if(MEMENTO_MAC_CROSSCOMPILE_X86)
+	set(CMAKE_OSX_ARCHITECTURES "x86_64")
+endif()
+
+# Third-party include paths come from imported CMake targets. Keeping host
+# package-manager directories out of this list prevents accidental mixtures
+# such as Homebrew headers with MacPorts libraries in release builds.
+set(MEMENTO_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src")
+
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(JsonC REQUIRED)
+find_package(libzip REQUIRED)
+find_package(mpv REQUIRED)
+find_package(SQLite3 REQUIRED)
+if(NOT TARGET SQLite3::SQLite3 AND TARGET SQLite::SQLite3)
+	add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
+endif()
+if(MEMENTO_SYSTEM_QCORO)
+	find_package(QCoro6 REQUIRED COMPONENTS Core Network Qml)
+endif()
+if(MEMENTO_MECAB_SUPPORT)
+	find_package(MeCab REQUIRED)
+endif()
+if(MEMENTO_OCR_SUPPORT AND MEMENTO_SYSTEM_MOCR)
+	find_package(mocr REQUIRED)
+endif()
+
+set(
+	MEMENTO_QT_COMPONENTS
+	Concurrent
+	Core
+	Gui
+	LinguistTools
+	Network
+	OpenGL
+	Qml
+	Quick
+	QuickControls2
+	Svg
+)
+if(APPLE)
+	list(APPEND MEMENTO_QT_COMPONENTS QuickPrivate)
+endif()
+if(UNIX AND NOT APPLE)
+	list(APPEND MEMENTO_QT_COMPONENTS DBus)
+endif()
+if(MEMENTO_QAPPLICATION)
+	list(APPEND MEMENTO_QT_COMPONENTS Widgets)
+endif()
+set(QT_NO_PRIVATE_MODULE_WARNING ON CACHE BOOL "Suppress Qt private module warning" FORCE)
+find_package(Qt6 REQUIRED COMPONENTS ${MEMENTO_QT_COMPONENTS})
+unset(MEMENTO_QT_COMPONENTS)
+
+qt_standard_project_setup(REQUIRES 6.9)
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Qt6 REQUIRED COMPONENTS Test)
+endif()
+
+if(WIN32)
+	add_subdirectory(windows)
+endif()
+
+add_subdirectory(extern)
+add_subdirectory(src)
+add_subdirectory(res)
+if(BUILD_TESTING)
+    add_subdirectory(tests)
+endif()

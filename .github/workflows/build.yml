@@ -1,0 +1,285 @@
+name: Build CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to validate and package
+        type: choice
+        options: [all, windows, linux]
+        default: all
+  workflow_call:
+    inputs:
+      platform:
+        type: string
+        default: all
+  push:
+    branches:
+      - main
+      - dev
+      - master
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - dev
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}-${{ github.event_name }}-${{ inputs.platform || 'all' }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    if: inputs.platform != 'windows'
+    name: Build Linux x86_64
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libcurl4-openssl-dev \
+            ffmpeg \
+            libjson-c-dev \
+            libmecab-dev \
+            libmpv-dev \
+            libsqlite3-dev \
+            libtorrent-rasterbar-dev \
+            libzip-dev \
+            mecab-ipadic \
+            mesa-common-dev \
+            ninja-build \
+            xauth \
+            xvfb
+
+      - name: Install Qt 6.9
+        uses: jurplel/install-qt-action@bcb88e3bed2e992f5f9e24c0f9e364a231d278eb # v4
+        with:
+          version: '6.9.*'
+          host: linux
+          target: desktop
+          install-deps: true
+
+      - name: Configure, build, and test
+        run: |
+          set -euo pipefail
+
+          python3 .github/scripts/audit-distribution.py
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMEMENTO_RELEASE_BUILD=ON \
+            -DMEMENTO_MECAB_SUPPORT=ON \
+            -DMEMENTO_OCR_SUPPORT=OFF \
+            -DMEMENTO_WERROR=ON \
+            -DQT_NO_PRIVATE_MODULE_WARNING=OFF
+          cmake --build build --parallel "$(nproc)"
+          ctest --test-dir build --output-on-failure
+          xvfb-run -a python3 .github/scripts/verify-media-export.py build/src/memento
+
+      - name: Verify executable dependencies and startup
+        run: |
+          set -euo pipefail
+
+          test -x build/src/memento
+          ldd build/src/memento | tee build/memento-ldd.txt
+          if grep -q 'not found' build/memento-ldd.txt; then
+            echo "::error::The Linux executable has unresolved dependencies."
+            exit 1
+          fi
+          grep -Eq 'libtorrent-rasterbar\.so' build/memento-ldd.txt
+          build/src/memento --help | grep -q '^Usage: memento'
+          timeout --signal=TERM --kill-after=5s 30s \
+            xvfb-run -a build/src/memento --smoke-test
+
+  windows:
+    if: inputs.platform != 'linux'
+    name: Build and package Windows x86_64
+    runs-on: windows-2025
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Install dependencies
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: ucrt64
+          update: true
+          install: >-
+            curl
+            unzip
+            zip
+            mingw-w64-ucrt-x86_64-ccache
+            mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-ca-certificates
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gdb
+            mingw-w64-ucrt-x86_64-git
+            mingw-w64-ucrt-x86_64-json-c
+            mingw-w64-ucrt-x86_64-libtorrent-rasterbar
+            mingw-w64-ucrt-x86_64-libzip
+            mingw-w64-ucrt-x86_64-mecab
+            mingw-w64-ucrt-x86_64-mesa
+            mingw-w64-ucrt-x86_64-mpv
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-nsis
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-qt6-translations
+            mingw-w64-ucrt-x86_64-sqlite3
+
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Cache Windows compiler results
+        id: windows-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ccache
+          key: windows-ucrt64-${{ github.sha }}
+          restore-keys: windows-ucrt64-
+
+      - name: Build, test, and package
+        run: |
+          set -euo pipefail
+
+          export CCACHE_DIR="$(cygpath -w "$PWD/.ccache")"
+          ccache --max-size=1G
+          ./windows/build-installer.sh \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMEMENTO_RELEASE_BUILD=ON \
+            -DMEMENTO_MECAB_SUPPORT=ON \
+            -DMEMENTO_OCR_SUPPORT=OFF \
+            -DMEMENTO_WIN32_EXECUTABLE=ON \
+            -DMEMENTO_WERROR=ON
+          objdump -f build/Memento_x86_64/memento.exe |
+            grep -Eq 'file format pei-x86-64|architecture: i386:x86-64'
+          test -s build/Memento_Windows_x86_64_Installer.exe
+
+          (
+            cd build
+            zip -r ../Memento_Windows_x86_64.zip Memento_x86_64
+          )
+          cp \
+            build/Memento_Windows_x86_64_Installer.exe \
+            Memento_Windows_x86_64_Installer.exe
+          test -s Memento_Windows_x86_64.zip
+          test -s Memento_Windows_x86_64_Installer.exe
+
+      - name: Preserve compiler results after failure
+        if: failure() && steps.windows-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .ccache
+          key: windows-ucrt64-${{ github.sha }}
+
+      - name: Verify silent install, installed startup, and uninstall
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          ./windows/test-installer.ps1 `
+            -InstallerPath ./Memento_Windows_x86_64_Installer.exe `
+            -FailureInstallerPath ./build/Memento_Windows_x86_64_Installer_FailureTest.exe `
+            -LegacyInstallerPath ./build/Memento_Windows_x86_64_Installer_LegacyTest.exe `
+            -ProcessTimeoutSeconds 180
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-x86_64-packages
+          path: |
+            Memento_Windows_x86_64.zip
+            Memento_Windows_x86_64_Installer.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  flatpak:
+    if: github.event_name == 'workflow_dispatch' && inputs.platform != 'windows'
+    name: Package Linux Flatpak x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Flatpak builder and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder xvfb
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.kde.Sdk//6.10 org.kde.Platform//6.10
+      - name: Cache Flatpak dependency builds
+        id: flatpak-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .flatpak-builder/cache
+            .flatpak-builder/downloads
+            .flatpak-builder/git
+          key: flatpak-6.10-${{ hashFiles('linux/flatpak/*.json') }}-${{ github.sha }}
+          restore-keys: |
+            flatpak-6.10-${{ hashFiles('linux/flatpak/*.json') }}-
+            flatpak-6.10-
+      - name: Build from clean checkout
+        run: |
+          flatpak-builder --user --force-clean --disable-rofiles-fuse --repo=flatpak-repo --default-branch=stable flatpak-build linux/flatpak/io.github.mu0dev.MementoCustom.json
+          python3 .github/scripts/audit-distribution.py flatpak-build/files
+          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo flatpak-repo Memento_Linux_x86_64.flatpak io.github.mu0dev.MementoCustom stable
+      - name: Preserve completed dependencies after a failed build
+        if: failure() && steps.flatpak-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .flatpak-builder/cache
+            .flatpak-builder/downloads
+            .flatpak-builder/git
+          key: flatpak-6.10-${{ hashFiles('linux/flatpak/*.json') }}-${{ github.sha }}
+      - name: Verify package startup
+        run: |
+          flatpak install --user -y Memento_Linux_x86_64.flatpak
+          timeout 45s xvfb-run -a flatpak run io.github.mu0dev.MementoCustom --smoke-test
+          xvfb-run -a python3 .github/scripts/verify-media-export.py --flatpak io.github.mu0dev.MementoCustom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-x86_64-package
+          path: Memento_Linux_x86_64.flatpak
+          if-no-files-found: error
+          retention-days: 7
+
+  verify-windows:
+    name: Verify Windows package on a fresh runner
+    needs: windows
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: windows-x86_64-packages
+          path: packages
+      - name: Test without MSYS2 or build dependencies
+        shell: pwsh
+        run: |
+          Expand-Archive packages/Memento_Windows_x86_64.zip extracted
+          python .github/scripts/audit-distribution.py extracted
+          python .github/scripts/verify-media-export.py extracted/Memento_x86_64/memento.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Media export verification failed' }
+          $env:MEMENTO_TEST_NETWORK = '1'
+          $process = Start-Process extracted/Memento_x86_64/memento.exe -ArgumentList '--smoke-test' -PassThru
+          if (-not $process.WaitForExit(60000)) { $process.Kill(); throw 'HTTPS check timed out' }
+          if ($process.ExitCode -ne 0) { throw 'HTTPS/certificate verification failed' }
