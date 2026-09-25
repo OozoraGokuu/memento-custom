@@ -36,7 +36,7 @@ for p in files:
         errors.append(f'Profile/cache file: {p}')
     data = p.read_bytes()
     for match in secrets.finditer(data):
-        block = pem.match(data, match.start()) if p.name == 'libgnutls-30.dll' else None
+        block = pem.match(data, match.start()) if (p.name == 'libgnutls-30.dll' or re.fullmatch(r'libgnutls(?:\.\d+)*\.dylib', p.name)) else None
         if block and hashlib.sha256(block.group()).hexdigest() in gnutls_test_keys:
             continue
         errors.append(f'Credential pattern: {p}')
