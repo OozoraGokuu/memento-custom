@@ -1,0 +1,56 @@
+name: macOS packages
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native dependencies
+        run: bash macos/setup-dependencies.sh
+      - uses: jurplel/install-qt-action@bcb88e3bed2e992f5f9e24c0f9e364a231d278eb
+        with:
+          version: '6.9.*'
+          host: mac
+          target: desktop
+      - name: Configure, compile and test
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          export PKG_CONFIG_PATH=/opt/local/lib/pkgconfig
+          python3 .github/scripts/audit-distribution.py
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;/opt/local" \
+            -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local" \
+            -DMEMENTO_RELEASE_BUILD=ON -DMEMENTO_BUNDLE=ON \
+            -DMEMENTO_MECAB_SUPPORT=ON -DMEMENTO_OCR_SUPPORT=OFF \
+            -DMEMENTO_WERROR=ON -DMEMENTO_CODESIGN_IDENTITY=-
+          cmake --build build --parallel 3
+          ctest --test-dir build --output-on-failure
+      - name: Package and verify standalone app
+        run: |
+          set -euo pipefail
+          cmake --install build --prefix "$PWD/stage"
+          python3 .github/scripts/audit-distribution.py --package stage
+          python3 .github/scripts/verify-media-export.py stage/Memento.app/Contents/MacOS/Memento
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
+          bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.0 io.github.OozoraGokuu.MementoCustom
+          shasum -a 256 artifacts/*.zip > artifacts/SHA256SUMS-macOS-${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: macos-${{ matrix.arch }}-package
+          path: artifacts/*
+          if-no-files-found: error

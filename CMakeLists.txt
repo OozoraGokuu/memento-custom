@@ -12,7 +12,7 @@ project(
     Memento
     VERSION 2.3.0
     DESCRIPTION "Memento Study Edition, an mpv-based Japanese study player"
-	HOMEPAGE_URL "https://github.com/mu0dev/memento-custom"
+	HOMEPAGE_URL "https://github.com/OozoraGokuu/memento-custom"
     LANGUAGES C CXX
 )
 

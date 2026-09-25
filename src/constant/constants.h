@@ -27,7 +27,7 @@ namespace Links
 {
 
 constexpr const char *GITHUB_API = "https://api.github.com/repos/mu0dev/memento-custom/releases/latest";
-constexpr const char *GITHUB_RELEASES = "https://github.com/mu0dev/memento-custom/releases";
+constexpr const char *GITHUB_RELEASES = "https://github.com/OozoraGokuu/memento-custom/releases";
 
 } // Links
 

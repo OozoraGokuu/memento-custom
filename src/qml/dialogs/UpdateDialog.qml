@@ -37,7 +37,7 @@ Dialog {
      */
     function check(silentFailure) {
         const MEMENTO_GITHUB_API_URL = "https://api.github.com/repos/mu0dev/memento-custom/releases/latest";
-        const MEMENTO_GITHUB_URL = "https://github.com/mu0dev/memento-custom/releases/latest";
+        const MEMENTO_GITHUB_URL = "https://github.com/OozoraGokuu/memento-custom/releases/latest";
         const FAILURE_TITLE = qsTr("Update Check Failed");
         const FAILURE_MESSAGE = qsTr(
             "<p>The GitHub API did not return a valid reply.</p>" +

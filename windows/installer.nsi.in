@@ -17,9 +17,9 @@
 !define STAGEMARKER ".memento-study-edition-stage-marker"
 !define STAGEMARKERCONTENT "${APPNAME} staging v1"
 !define UNINSTALLKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${COMPANYNAME} ${APPNAME}"
-!define HELPURL "https://github.com/mu0dev/memento-custom/blob/main/README.md"
-!define UPDATEURL "https://github.com/mu0dev/memento-custom/releases"
-!define ABOUTURL "https://github.com/mu0dev/memento-custom"
+!define HELPURL "https://github.com/OozoraGokuu/memento-custom/blob/main/README.md"
+!define UPDATEURL "https://github.com/OozoraGokuu/memento-custom/releases"
+!define ABOUTURL "https://github.com/OozoraGokuu/memento-custom"
 !define INSTALLSIZE 240000
 
 !ifndef MEMENTO_INSTALLER_OUTFILE

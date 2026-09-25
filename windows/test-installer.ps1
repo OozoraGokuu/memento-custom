@@ -219,15 +219,15 @@ function Assert-InstalledState {
     Assert-Equal $metadata.DisplayVersion $expectedVersion 'DisplayVersion'
     Assert-Equal `
         $metadata.HelpLink `
-        'https://github.com/mu0dev/memento-custom/blob/main/README.md' `
+        'https://github.com/OozoraGokuu/memento-custom/blob/main/README.md' `
         'HelpLink'
     Assert-Equal `
         $metadata.URLUpdateInfo `
-        'https://github.com/mu0dev/memento-custom/releases' `
+        'https://github.com/OozoraGokuu/memento-custom/releases' `
         'URLUpdateInfo'
     Assert-Equal `
         $metadata.URLInfoAbout `
-        'https://github.com/mu0dev/memento-custom' `
+        'https://github.com/OozoraGokuu/memento-custom' `
         'URLInfoAbout'
     Assert-Equal `
         ([int]$metadata.VersionMajor) `
