@@ -45,6 +45,11 @@ with tempfile.TemporaryDirectory(prefix='Memento package ',
         for key in list(env):
             if key.startswith(('QT_', 'QML', 'SSL_CERT', 'CURL_CA', 'OPENSSL')):
                 del env[key]
+    if sys.platform == 'darwin':
+        env['PATH'] = '/usr/bin:/bin:/usr/sbin:/sbin'
+        for key in list(env):
+            if key.startswith(('QT_', 'QML', 'DYLD_', 'SSL_CERT', 'CURL_CA', 'OPENSSL')):
+                del env[key]
     if args.flatpak:
         command = ['flatpak', 'run', f'--env=MEMENTO_TEST_MEDIA={media}',
             f'--env=MEMENTO_TEST_EXPORT={output}', args.flatpak]

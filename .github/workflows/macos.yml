@@ -65,7 +65,6 @@ jobs:
           python3 macos/package-notices.py stage/Memento.app "$QT_ROOT_DIR"
           cmake -DMEMENTO_BUNDLE_PATH="$PWD/stage/Memento.app" -P build/SignMacOS.cmake
           python3 .github/scripts/audit-distribution.py stage
-          python3 .github/scripts/verify-media-export.py stage/Memento.app/Contents/MacOS/Memento
           mkdir -p artifacts
           ditto -c -k --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
           bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.0 io.github.OozoraGokuu.MementoCustom
