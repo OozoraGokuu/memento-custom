@@ -22,3 +22,9 @@ The Windows CI job compiles native x86_64 binaries with warnings treated as erro
 Automated tests cannot establish that every UI interaction, GPU/audio driver, or external account works. Live AniList writes, authenticated Jimaku downloads, Anki card creation and Migaku Memory import require a user's own accounts and must be checked separately. CI does not use or publish the maintainer's credentials. Public torrent peers and provider availability are not deterministic test services.
 
 Before relying on a new machine, play a local file, verify picture and sound, load primary/secondary subtitles, try lookup and auto-pause, export one image/audio pair, and confirm its audio plays. Configure and test accounts individually; check episode mapping before enabling automatic AniList updates.
+
+## macOS
+
+The macOS workflow tests Apple Silicon and Intel separately on macOS 15 runners. Publication requires CTest, source/package privacy audits, extracted-ZIP startup, complete bundled library checks, architecture and deployment-target checks, ad-hoc signature verification, and real subtitle/image/audio export to pass. The extracted package media test removes Qt and dynamic-library search variables and uses a system-only executable PATH.
+
+This does not establish compatibility with every physical Mac, display, audio device, or live account. Gatekeeper notarization is not provided by these ad-hoc signed builds.

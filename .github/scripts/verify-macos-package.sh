@@ -47,10 +47,15 @@ codesign --verify --deep --strict --verbose=2 "$bundle"
 python3 "$repo_root/.github/scripts/verify-macos-bundle.py" \
     "$bundle" "$expected_arch" "$minimum_macos"
 
+# Test the extracted app without Qt or package-manager search paths.
+python_executable=$(command -v python3)
+unset QT_PLUGIN_PATH QML2_IMPORT_PATH QML_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 "$executable" --help | grep -q '^Usage: memento'
-python3 - "$executable" <<'PY'
+"$python_executable" - "$executable" <<'PY'
 import subprocess
 import sys
+import os
 
 try:
     result = subprocess.run(
@@ -61,8 +66,14 @@ try:
 except subprocess.TimeoutExpired:
     raise SystemExit("Packaged Memento smoke test timed out after 30 seconds")
 
-raise SystemExit(result.returncode)
+if result.returncode:
+    raise SystemExit(result.returncode)
+network = subprocess.run([sys.argv[1], "--smoke-test"],
+    env=dict(os.environ, MEMENTO_TEST_NETWORK="1"), timeout=90)
+raise SystemExit(network.returncode)
 PY
+
+"$python_executable" "$repo_root/.github/scripts/verify-media-export.py" "$executable"
 
 test "$(/usr/libexec/PlistBuddy \
     -c 'Print :LSMinimumSystemVersion' "$plist")" = "$minimum_macos"

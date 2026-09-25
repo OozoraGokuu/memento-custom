@@ -137,8 +137,8 @@ TorrentSearchNetworkReply::Response TorrentSearchNetworkReply::transfer(
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 20000L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-#ifdef Q_OS_WIN
-        // Use Windows trust roots, including on machines without MSYS2.
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+        // Use native trust roots and a bundled CA set on standalone desktop builds.
         curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_NATIVE_CA));
         // A bundled CA set also covers curl's separate DNS-over-HTTPS handles.
         // Read with Qt so non-ASCII install paths work with every curl backend.

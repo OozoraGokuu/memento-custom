@@ -3,7 +3,7 @@
 Vibecoded, added lots of QoL changes that i believed should've been in memento.
 # Memento Custom
 
-An unofficial Windows and Linux build of [Memento](https://github.com/ripose-jp/Memento), an mpv-based Japanese study player. GPL-2.0; original project and dependency attribution are retained.
+An unofficial Windows, Linux and macOS build of [Memento](https://github.com/ripose-jp/Memento), an mpv-based Japanese study player. GPL-2.0; original project and dependency attribution are retained.
 
 
 [Downloads](https://github.com/OozoraGokuu/memento-custom/releases) · [Build and test results](https://github.com/OozoraGokuu/memento-custom/actions) · [Validation coverage](docs/VALIDATION.md)
@@ -21,6 +21,8 @@ flatpak run io.github.mu0dev.MementoCustom
 ```
 
 This Flatpak has its own app ID, separate from upstream Memento. Export folders outside your home directory may require a Flatpak filesystem permission. Upstream Flathub/AUR builds do not include this fork's additions.
+
+**macOS 15 or later:** choose `Memento_macOS_arm64.zip` for Apple Silicon (M1 or newer), or `Memento_macOS_x86_64.zip` for Intel. Extract the ZIP and drag **Memento.app** into Applications. No Homebrew or MacPorts installation is needed. These builds use an ad-hoc signature and are not Apple-notarized; macOS may require approval in System Settings → Privacy & Security after the first launch attempt.
 
 ## Included features
 
@@ -63,3 +65,7 @@ ctest --test-dir build --output-on-failure
 See [validation coverage](docs/VALIDATION.md) for what CI verifies and what needs testing with your own accounts. Releases contain source from this repository, never a copy of a user's installed profile.
 
 Windows bundles dependency licenses and a `package-versions.txt` inventory. Dependency build recipes are in [MSYS2 MINGW-packages](https://github.com/msys2/MINGW-packages); matching source archives are available from the [MSYS2 source mirror](https://repo.msys2.org/mingw/sources/). Linux dependency sources and patches are recorded in the Flatpak manifest. Memento's source is available at each release tag in this repository.
+
+## macOS builds
+
+The [macOS workflow](.github/workflows/macos.yml) builds each architecture natively with Qt 6.9 and a pinned MacPorts dependency tree. It runs CTest and checks the extracted app's dependencies, signature, minimum OS version, startup, subtitle capture, clipboard, and JPG/MP3 export. Dependency notices and the package inventory are included in `Memento.app/Contents/Resources/licenses`. See the workflow result for the tested commit; a running build is not a verified release.

@@ -43,6 +43,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake --install build --prefix "$PWD/stage"
+          python3 macos/package-notices.py stage/Memento.app "$QT_ROOT_DIR"
+          cmake -DMEMENTO_BUNDLE_PATH="$PWD/stage/Memento.app" -P build/SignMacOS.cmake
           python3 .github/scripts/audit-distribution.py stage
           python3 .github/scripts/verify-media-export.py stage/Memento.app/Contents/MacOS/Memento
           mkdir -p artifacts
