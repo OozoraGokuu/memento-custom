@@ -142,7 +142,11 @@ TorrentSearchNetworkReply::Response TorrentSearchNetworkReply::transfer(
         curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, static_cast<long>(CURLSSLOPT_NATIVE_CA));
         // A bundled CA set also covers curl's separate DNS-over-HTTPS handles.
         // Read with Qt so non-ASCII install paths work with every curl backend.
+#ifdef Q_OS_MACOS
+        QFile caFile(QCoreApplication::applicationDirPath() + "/../Resources/cacert.pem");
+#else
         QFile caFile(QCoreApplication::applicationDirPath() + "/cacert.pem");
+#endif
         QByteArray caData;
         if (caFile.open(QIODevice::ReadOnly)) caData = caFile.readAll();
         if (!caData.isEmpty()) {

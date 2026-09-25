@@ -29,7 +29,7 @@ for label, root in [('MacPorts', Path('/opt/local/share/doc')), ('Qt', qt / 'Lic
 # libcurl and its DoH transport must work without the build machine's CA path.
 for certificate in [Path('/opt/local/share/curl/curl-ca-bundle.crt'), Path('/etc/ssl/cert.pem')]:
     if certificate.is_file():
-        shutil.copy2(certificate, bundle / 'Contents/MacOS/cacert.pem')
+        shutil.copy2(certificate, bundle / 'Contents/Resources/cacert.pem')
         break
 else:
     raise SystemExit('No CA bundle found for the standalone app')
