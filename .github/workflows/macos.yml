@@ -49,8 +49,14 @@ jobs:
           test "$(uname -m)" = '${{ matrix.arch }}'
           unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH
           export PKG_CONFIG_PATH=/opt/local/lib/pkgconfig
+          # Keep preinstalled Homebrew headers out of this MacPorts build.
+          # This directory belongs only to the disposable GitHub runner.
+          if [[ -d /usr/local/include ]]; then
+            sudo mv /usr/local/include "/usr/local/include.memento-unused-${GITHUB_RUN_ID}"
+          fi
           test -f /opt/local/include/zip.h
-          printf '#include <zip.h>\n' | /usr/bin/c++ -x c++ -E -H -isystem /opt/local/include - >/dev/null 2>header-trace.txt
+          printf '#include <zip.h>\n' | /usr/bin/c++ -x c++ -E -H -isystem /opt/local/include - >/dev/null 2>header-trace.txt || { cat header-trace.txt; exit 1; }
+          cat header-trace.txt
           grep -F '/opt/local/include/zip.h' header-trace.txt
           python3 .github/scripts/audit-distribution.py
           cmake -S . -B build -G Ninja \
