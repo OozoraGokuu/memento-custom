@@ -57,9 +57,15 @@ if(NOT EXISTS "${MEMENTO_BUNDLE_PATH}")
     )
 endif()
 
+# macdeployqt adds dynamically loaded plugins after the executable's initial
+# dependency pass. Their private Qt frameworks need the same closure handling.
+file(GLOB_RECURSE MEMENTO_BUNDLE_PLUGINS
+    "${MEMENTO_BUNDLE_PATH}/Contents/PlugIns/*.dylib"
+    "${MEMENTO_BUNDLE_PATH}/Contents/Resources/qml/*.dylib"
+)
 message(STATUS "Bundling macOS dependencies into ${MEMENTO_BUNDLE_PATH}")
 fixup_bundle(
     "${MEMENTO_BUNDLE_PATH}"
-    ""
+    "${MEMENTO_BUNDLE_PLUGINS}"
     "${MEMENTO_BUNDLE_LIBRARY_DIRS}"
 )

@@ -302,6 +302,7 @@ if(APPLE AND MEMENTO_BUNDLE)
     )
     install(SCRIPT "${PROJECT_BINARY_DIR}/BundleMacOS.cmake")
     install(SCRIPT "${PROJECT_BINARY_DIR}/DeployQtMacOS.cmake")
+    install(SCRIPT "${PROJECT_BINARY_DIR}/BundleMacOS.cmake")
 
     configure_file(
         "${PROJECT_SOURCE_DIR}/cmake/CopyTranslationsMacOS.cmake.in"
@@ -329,6 +330,10 @@ if(APPLE AND MEMENTO_BUNDLE)
             "${CMAKE_COMMAND}"
             -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
             -P "${PROJECT_BINARY_DIR}/DeployQtMacOS.cmake"
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+            -P "${PROJECT_BINARY_DIR}/BundleMacOS.cmake"
         COMMAND
             "${CMAKE_COMMAND}"
             -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
