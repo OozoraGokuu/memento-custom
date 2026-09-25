@@ -1,6 +1,12 @@
 name: macOS packages
 on:
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Architecture to build and validate
+        type: choice
+        options: [all, arm64, x86_64]
+        default: all
 permissions:
   contents: read
 jobs:
@@ -8,12 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+        arch: ${{ fromJSON(inputs.architecture == 'all' && '["arm64","x86_64"]' || format('["{0}"]', inputs.architecture)) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'macos-15' || 'macos-15-intel' }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
