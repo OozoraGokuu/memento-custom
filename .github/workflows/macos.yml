@@ -43,10 +43,10 @@ jobs:
         run: |
           set -euo pipefail
           cmake --install build --prefix "$PWD/stage"
-          python3 .github/scripts/audit-distribution.py --package stage
+          python3 .github/scripts/audit-distribution.py stage
           python3 .github/scripts/verify-media-export.py stage/Memento.app/Contents/MacOS/Memento
           mkdir -p artifacts
-          ditto -c -k --sequesterRsrc --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
+          ditto -c -k --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
           bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.0 io.github.OozoraGokuu.MementoCustom
           shasum -a 256 artifacts/*.zip > artifacts/SHA256SUMS-macOS-${{ matrix.arch }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
