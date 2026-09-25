@@ -47,7 +47,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(uname -m)" = '${{ matrix.arch }}'
+          unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH
           export PKG_CONFIG_PATH=/opt/local/lib/pkgconfig
+          test -f /opt/local/include/zip.h
+          printf '#include <zip.h>\n' | /usr/bin/c++ -x c++ -E -H -isystem /opt/local/include - >/dev/null 2>header-trace.txt
+          grep -F '/opt/local/include/zip.h' header-trace.txt
           python3 .github/scripts/audit-distribution.py
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
