@@ -140,4 +140,10 @@ target_compile_options(memento_anki_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_include_directories(memento_anki_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
 target_link_libraries(memento_anki_tests PRIVATE context Qt6::Network Qt6::Test)
 add_test(NAME anki-http-and-note COMMAND memento_anki_tests)
-set_tests_properties(anki-http-and-note PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(APPLE)
+    # This integration test creates a real player. The macOS renderer needs
+    # Cocoa's OpenGL context support; Qt's offscreen plugin cannot provide it.
+    set_tests_properties(anki-http-and-note PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+else()
+    set_tests_properties(anki-http-and-note PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
