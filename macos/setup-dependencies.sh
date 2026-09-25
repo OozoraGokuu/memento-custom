@@ -29,6 +29,12 @@ curl \
 printf '%s  %s\n' "${macports_sha256}" "${macports_pkg}" | shasum -a 256 --check
 sudo installer -pkg "${macports_pkg}" -target /
 
+if [[ -n "${MEMENTO_MACPORTS_CACHE:-}" && -s "$MEMENTO_MACPORTS_CACHE" ]]; then
+    sudo tar -xzf "$MEMENTO_MACPORTS_CACHE" -C /opt
+    /opt/local/bin/port installed
+    exit 0
+fi
+
 sudo mkdir -p "$(dirname "${macports_tree}")"
 sudo git clone \
     --filter=blob:none \

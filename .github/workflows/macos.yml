@@ -17,8 +17,25 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        id: dependencies
+        with:
+          path: ${{ runner.temp }}/memento-macports.tar.gz
+          key: macports-15-${{ matrix.arch }}-${{ hashFiles('macos/setup-dependencies.sh') }}
       - name: Install native dependencies
+        env:
+          MEMENTO_MACPORTS_CACHE: ${{ runner.temp }}/memento-macports.tar.gz
         run: bash macos/setup-dependencies.sh
+      - name: Save dependency snapshot
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo tar --exclude=local/var/macports/build --exclude=local/var/macports/software --exclude=local/var/macports/distfiles --exclude=.git -C /opt -cf - local | gzip -1 > "$RUNNER_TEMP/memento-macports.tar.gz"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: steps.dependencies.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/memento-macports.tar.gz
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
       - uses: jurplel/install-qt-action@bcb88e3bed2e992f5f9e24c0f9e364a231d278eb
         with:
           version: '6.9.*'
@@ -32,7 +49,7 @@ jobs:
           python3 .github/scripts/audit-distribution.py
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;/opt/local" \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;/opt/local;/opt/local/libexec/boost/1.88" \
             -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local" \
             -DMEMENTO_RELEASE_BUILD=ON -DMEMENTO_BUNDLE=ON \
             -DMEMENTO_MECAB_SUPPORT=ON -DMEMENTO_OCR_SUPPORT=OFF \
@@ -50,7 +67,7 @@ jobs:
           mkdir -p artifacts
           ditto -c -k --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
           bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.0 io.github.OozoraGokuu.MementoCustom
-          shasum -a 256 artifacts/*.zip > artifacts/SHA256SUMS-macOS-${{ matrix.arch }}
+          (cd artifacts && shasum -a 256 *.zip > SHA256SUMS-macOS-${{ matrix.arch }})
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: macos-${{ matrix.arch }}-package
