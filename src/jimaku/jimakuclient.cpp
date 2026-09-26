@@ -772,6 +772,9 @@ void JimakuClient::handleFileList(
     if (m_operation == Operation::ManualFiles)
     {
         setBrowseFiles(usableFiles(files));
+        if (m_context && m_selectedEpisode >= 0 && !m_browseFiles.isEmpty())
+            m_context->episodeLibrary()->rememberSubtitleSearch(
+                {{"provider", "jimaku"}, {"name", m_entryName}, {"entryId", entryId}}, m_selectedEpisode);
         m_operation = Operation::None;
         setBusy(false);
         if (m_browseFiles.isEmpty())

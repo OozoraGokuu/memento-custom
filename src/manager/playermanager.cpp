@@ -60,6 +60,22 @@ PlayerManager::PlayerManager(Context *context, QObject *parent) :
         this, &PlayerManager::handlePrimarySubtitleListChanged
     );
     handlePrimarySubtitleListChanged(m_context->subtitleLists()->primary());
+    connect(m_context->player()->controller(), &MpvController::audioTrackSelected, this, [this](int64_t id) {
+        const auto *state = m_context->player()->state();
+        int ordinal = id == 0 ? 0 : -1;
+        for (int i = 0; i < state->audioTracks().size(); ++i)
+            if (state->audioTracks()[i]->id() == id) ordinal = i + 1;
+        if (ordinal >= 0 && !m_restoringAudio)
+            m_context->episodeLibrary()->setDefaultAudioTrackForFile(state->path(), ordinal);
+    });
+    connect(m_context->player(), &MpvPlayer::fileLoaded, this, [this] {
+        const auto *state = m_context->player()->state();
+        const int ordinal = m_context->episodeLibrary()->defaultAudioTrackForFile(state->path());
+        if (ordinal < 0 || ordinal > state->audioTracks().size()) return;
+        m_restoringAudio = true;
+        m_context->player()->controller()->setAid(ordinal == 0 ? 0 : state->audioTracks()[ordinal - 1]->id());
+        m_restoringAudio = false;
+    }, Qt::QueuedConnection);
 }
 
 PlayerManager::~PlayerManager()

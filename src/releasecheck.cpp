@@ -27,6 +27,9 @@ void fail(const QString &message)
 
 void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
 {
+    const QString previousClipboard = QGuiApplication::clipboard()->text();
+    QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+        &engine, [previousClipboard] { QGuiApplication::clipboard()->setText(previousClipboard); });
     if (!context.ankiConfig()->profile()->apiKey().isEmpty() ||
         context.settings()->behaviorSubtitleAutoCopy() ||
         context.jimakuClient()->apiKeyConfigured() ||
@@ -66,6 +69,27 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
     if (!activity->property("visible").toBool()) { fail("Subtitle loading is not visible in the Activity panel."); return; }
     subtitles->setLoading(false);
     if (activity->property("visible").toBool()) { fail("Activity panel did not clear completed subtitle loading."); return; }
+    // Copying a complete cue works with the subtitle list closed and no text selection.
+    subtitles->setItems({{QStringLiteral("猫です。\n犬もいます。"), 1.0, 3.0}});
+    subtitles->selectPosition(1.5);
+    context.settings()->setWindowSubtitleList(false);
+    QObject *copyAction = engine.rootObjects().first()->findChild<QObject *>("copyCurrentSubtitleAction");
+    if (!copyAction || !QMetaObject::invokeMethod(copyAction, "triggered", Q_ARG(QObject *, nullptr)) ||
+        QGuiApplication::clipboard()->text() != QStringLiteral("猫です。\n犬もいます。")) {
+        fail("Copy-current-subtitle did not copy the complete cue with the subtitle list closed."); return;
+    }
+    const QString libraryScreenshot = qEnvironmentVariable("MEMENTO_TEST_LIBRARY_SCREENSHOT");
+    if (!libraryScreenshot.isEmpty()) {
+        context.settings()->setWindowLibrary(true);
+        auto *libraryWindow = engine.rootObjects().first()->findChild<QQuickWindow *>("mediaLibraryWindow");
+        QTimer::singleShot(500, &engine, [libraryWindow, libraryScreenshot] {
+            if (!libraryWindow || !libraryWindow->isVisible() || !libraryWindow->grabWindow().save(libraryScreenshot)) {
+                fail("Could not capture separate library window."); return;
+            }
+            QCoreApplication::exit(0);
+        });
+        return;
+    }
     const QString uiScreenshot = qEnvironmentVariable("MEMENTO_TEST_UI_SCREENSHOT");
     if (!uiScreenshot.isEmpty()) {
         subtitles->setLoading(true);
@@ -128,9 +152,6 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
     auto observedLoading = std::make_shared<bool>(false);
     QObject::connect(context.player(), &MpvPlayer::playbackStatusChanged, &engine,
         [player = context.player(), observedLoading] { if (player->loading()) *observedLoading = true; });
-    const QString previousClipboard = QGuiApplication::clipboard()->text();
-    QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
-        &engine, [previousClipboard] { QGuiApplication::clipboard()->setText(previousClipboard); });
     context.settings()->setBehaviorSubtitleAutoCopy(true);
     auto *client = context.migakuClient();
     client->setEnabled(true);

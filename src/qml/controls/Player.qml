@@ -36,6 +36,7 @@ MpvPlayer {
 
     signal auxiliarySearchRequested(string text)
     signal jimakuSearchRequested()
+    signal nextSubtitleSearchRequested()
     signal torrentSearchRequested()
 
     enum OscVisibility
@@ -167,7 +168,7 @@ MpvPlayer {
 
     /** Apply the same text cleanup to both Memento subtitle tracks. */
     function cleanSubtitleText(source) {
-        let text = (source || "").replace(subtitleText.regexFilter, "");
+        let text = MementoSettings.filterSubtitleText(source || "", MementoSettings.searchRemoveRegex);
         if (MementoSettings.searchReplaceNewlines)
             text = text.split("\n").join(
                 MementoSettings.searchReplaceNewlinesWith);
@@ -249,9 +250,10 @@ MpvPlayer {
 
     Action {
         id: copySubtitleSelectionAction
-        enabled: subtitleText.visible && subtitleText.selectedText.length > 0
+        objectName: "copyCurrentSubtitleAction"
+        enabled: root.activeFocus && subtitleText.text.trim().length > 0
         shortcut: StandardKey.Copy
-        onTriggered: subtitleClipboard.setText(subtitleText.selectedText)
+        onTriggered: subtitleClipboard.setText(subtitleText.text)
     }
 
     Connections {
@@ -647,7 +649,6 @@ MpvPlayer {
     SubtitleText {
         id: subtitleText
 
-        readonly property var regexFilter: Utils.safeRegex(MementoSettings.searchRemoveRegex, "g")
 
         anchors {
             horizontalCenter: root.horizontalCenter
@@ -903,6 +904,7 @@ MpvPlayer {
         visible: Features.isMacos
         player: root
         onJimakuSearchRequested: root.jimakuSearchRequested()
+        onNextSubtitleSearchRequested: root.nextSubtitleSearchRequested()
         onTorrentSearchRequested: root.torrentSearchRequested()
         onShowSubtitlesChanged: root.synchronizeSubtitleRenderers()
 

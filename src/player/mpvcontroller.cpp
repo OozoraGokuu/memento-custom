@@ -701,6 +701,7 @@ void MpvController::setAid(int64_t id)
     {
         qWarning("Could not set audio track to %" PRId64, id);
     }
+    else emit audioTrackSelected(id);
 }
 
 void MpvController::setSid(int64_t id)

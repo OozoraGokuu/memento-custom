@@ -481,6 +481,7 @@ public:
         bool nativeSecondary = false);
 
 signals:
+    void audioTrackSelected(int64_t id);
     /**
      * @brief Emitted when the player being controlled changes.
      */

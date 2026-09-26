@@ -475,13 +475,13 @@ QList<int> SubtitleListModel::find(QString str, bool ignoreWhitespace) const
         return {};
     }
 
-    QRegularExpression removeRegex(m_context->settings()->searchRemoveRegex());
+    const auto removeRegex = Settings::subtitleRegex(m_context->settings()->searchRemoveRegex());
 
     QList<int> results;
     for (size_t i = 0; i < m_items.size(); ++i)
     {
         QString subtitleText = m_items[i].text;
-        subtitleText.remove(removeRegex);
+        if (removeRegex.isValid()) subtitleText.remove(removeRegex);
         if (ignoreWhitespace)
         {
             subtitleText.remove(REGEX_REMOVE_WHITESPACE);

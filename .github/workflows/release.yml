@@ -6,6 +6,11 @@ on:
         description: Release tag (vMAJOR.MINOR.PATCH)
         required: true
         type: string
+      publish:
+        description: Publish automatically after all package checks pass
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -41,7 +46,7 @@ jobs:
           pattern: '*-package*'
           merge-multiple: true
           path: assets
-      - name: Create draft from validated packages
+      - name: Create release from validated packages
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -51,5 +56,7 @@ jobs:
           test -s assets/Memento_Linux_x86_64.flatpak
           test -s assets/Memento_macOS_arm64.zip
           test -s assets/Memento_macOS_x86_64.zip
-          (cd assets && sha256sum Memento* > SHA256SUMS.txt)
-          gh release create "$RELEASE_TAG" assets/* --draft --target "$GITHUB_SHA" --title "Memento Custom ${RELEASE_TAG#v}" --notes-file RELEASE_NOTES.md
+          (cd assets && sha256sum Memento* install-memento.sh > SHA256SUMS.txt)
+          release_options=(--draft)
+          if [[ "${{ inputs.publish }}" == "true" ]]; then release_options=(--latest); fi
+          gh release create "$RELEASE_TAG" assets/* "${release_options[@]}" --target "$GITHUB_SHA" --title "Memento Custom ${RELEASE_TAG#v}" --notes-file RELEASE_NOTES.md

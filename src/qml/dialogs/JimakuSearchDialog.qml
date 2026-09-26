@@ -12,6 +12,7 @@ Dialog {
     property int selectedEntryIndex: -1
     property var savedLink: ({})
     property bool browsingLink: false
+    property bool attachNextWhenReady: false
 
     function refreshLink() {
         savedLink = EpisodeLibrary.subtitleLinkForFile(root.player.state.path);
@@ -27,6 +28,7 @@ Dialog {
     readonly property var client: useJimaku ? JimakuClient : KitsunekkoClient
 
     function openForCurrentMedia() {
+        root.attachNextWhenReady = false;
         errorLabel.text = "";
         JimakuClient.clearSearch();
         KitsunekkoClient.clearSearch();
@@ -51,6 +53,28 @@ Dialog {
         });
     }
 
+    function openNextEpisode() {
+        const previous = EpisodeLibrary.lastSubtitleSearch;
+        if (!previous.provider || previous.episode < 0) return;
+        root.openForCurrentMedia();
+        root.savedLink = previous;
+        providerBox.currentIndex = previous.provider === "jimaku" ? 0 : 1;
+        queryField.text = previous.name;
+        episodeBox.value = previous.episode + 1;
+        root.attachNextWhenReady = true;
+        root.browseLink(false);
+    }
+
+    function attachNextIfUnambiguous() {
+        if (!root.attachNextWhenReady || root.client.busy) return;
+        root.attachNextWhenReady = false;
+        const files = root.client.fileResults;
+        let matches = [];
+        for (let i = 0; i < files.length; ++i)
+            if (files[i].episode === episodeBox.value) matches.push(i);
+        if (matches.length === 1) root.client.attachResult(matches[0]);
+    }
+
     function saveKeyAndTest() {
         JimakuClient.apiKey = apiKeyField.text;
         JimakuClient.testConnection();
@@ -72,11 +96,11 @@ Dialog {
     title: qsTr("Search Japanese subtitles")
     standardButtons: Dialog.Close
     closePolicy: Popup.CloseOnEscape
-    onClosed: { JimakuClient.cancel(); KitsunekkoClient.cancel(); }
+    onClosed: { root.attachNextWhenReady = false; JimakuClient.cancel(); KitsunekkoClient.cancel(); }
 
     Connections {
         target: EpisodeLibrary
-        function onLibraryChanged() { root.refreshLink(); }
+        function onLibraryChanged() { if (!root.browsingLink) root.refreshLink(); }
     }
 
     Connections {
@@ -88,8 +112,12 @@ Dialog {
 
     Connections {
         target: root.client
+        ignoreUnknownSignals: true
+        function onChanged() { Qt.callLater(root.attachNextIfUnambiguous); }
+        function onBusyChanged() { Qt.callLater(root.attachNextIfUnambiguous); }
 
         function onFailed(message) {
+            root.attachNextWhenReady = false;
             errorLabel.text = message;
         }
 

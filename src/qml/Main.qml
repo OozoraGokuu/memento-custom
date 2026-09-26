@@ -206,6 +206,7 @@ ApplicationWindow {
                 searchPage.setQuery(text);
             }
             onJimakuSearchRequested: jimakuSearchDialog.openForCurrentMedia()
+            onNextSubtitleSearchRequested: jimakuSearchDialog.openNextEpisode()
             onTorrentSearchRequested: torrentSearchDialog.openForCurrentMedia()
 
             Connections {
@@ -227,7 +228,6 @@ ApplicationWindow {
             id: toolSplitView
 
             readonly property bool hasVisibleChildren:
-                MementoSettings.windowLibrary ||
                 (MementoSettings.windowSearch && !MementoSettings.interfaceSearchWindow) ||
                 (MementoSettings.windowSubtitleList && !MementoSettings.interfaceSubtitleListWindow)
 
@@ -247,13 +247,6 @@ ApplicationWindow {
             parent: toolSplitView.hasVisibleChildren ? mainSplitView : null
             visible: toolSplitView.hasVisibleChildren
             orientation: Qt.Vertical
-
-            Item {
-                id: inlineLibraryHost
-                SplitView.minimumHeight: 220
-                SplitView.preferredHeight: 500
-                visible: MementoSettings.windowLibrary
-            }
 
             Item {
                 id: inlineSearchHost
@@ -327,13 +320,26 @@ ApplicationWindow {
         visible: MementoSettings.windowSearch
     }
 
-    LibraryPage {
-        id: libraryPage
-        parent: inlineLibraryHost
-        anchors.fill: parent
+    ApplicationWindow {
+        id: libraryWindow
+        objectName: "mediaLibraryWindow"
+        title: qsTr("Media Library — Memento")
+        width: 1060
+        height: 760
+        minimumWidth: 720
+        minimumHeight: 540
+        color: MementoPalette.window
         visible: MementoSettings.windowLibrary
-        player: player
-        onTorrentSearchRequested: torrentSearchDialog.openForCurrentMedia()
+        onClosing: MementoSettings.windowLibrary = false
+        LibraryPage {
+            id: libraryPage
+            anchors.fill: parent
+            player: player
+            onTorrentSearchRequested: {
+                root.raise(); root.requestActivate();
+                torrentSearchDialog.openForCurrentMedia();
+            }
+        }
     }
 
     TorrentSearchDialog {

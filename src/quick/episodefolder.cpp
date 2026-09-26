@@ -1021,6 +1021,7 @@ QStringList EpisodeFolder::rescan(int entryIndex)
                 {
                     duplicate.lastPlayed = entry.lastPlayed;
                 }
+                if (duplicate.audioTrack < 0) duplicate.audioTrack = entry.audioTrack;
                 if (duplicate.subtitleLink.isEmpty()) duplicate.subtitleLink = entry.subtitleLink;
                 duplicate.source = result.source;
 
@@ -1444,6 +1445,7 @@ QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
         {"nextEpisodeIndex", nextEpisode},
         {"lastPlayedIndex", lastPlayedIndex},
         {"subtitleLink", entry.subtitleLink},
+        {"audioTrack", entry.audioTrack},
     };
     if (entry.type == "torrent")
     {
@@ -1772,6 +1774,7 @@ bool EpisodeFolder::updateTorrentMetadata(
 void EpisodeFolder::loadLibrary()
 {
     const QJsonObject root = readLibraryObject();
+    m_lastSubtitleSearch = root.value("lastSubtitleSearch").toObject().toVariantMap();
     QString currentId = root.value("currentId").toString();
     const QJsonArray storedEntries = root.value("entries").toArray();
     for (const QJsonValue &value : storedEntries)
@@ -1796,6 +1799,7 @@ void EpisodeFolder::loadLibrary()
         entry.watched = QSet<QString>(watched.cbegin(), watched.cend());
         entry.lastPlayed = jsonString(object, "lastPlayed");
         entry.subtitleLink = object.value("subtitleLink").toObject().toVariantMap();
+        entry.audioTrack = object.value("audioTrack").toInt(-1);
 
         if (entry.id.isEmpty() || entry.title.isEmpty() ||
             (entry.type != "folder" && entry.type != "torrent"))
@@ -1859,6 +1863,7 @@ void EpisodeFolder::loadLibrary()
             {
                 existing.lastPlayed = m_entries.at(index).lastPlayed;
             }
+            if (existing.audioTrack < 0) existing.audioTrack = m_entries.at(index).audioTrack;
             if (existing.subtitleLink.isEmpty()) existing.subtitleLink = m_entries.at(index).subtitleLink;
             existing.source = result.source;
             m_entries.removeAt(index);
@@ -2026,11 +2031,13 @@ bool EpisodeFolder::writeLibrary() const
             {"watched", QJsonArray::fromStringList(watched)},
             {"lastPlayed", entry.lastPlayed},
             {"subtitleLink", QJsonObject::fromVariantMap(entry.subtitleLink)},
+            {"audioTrack", entry.audioTrack},
         });
     }
 
     const QJsonObject root{
         {"version", 1},
+        {"lastSubtitleSearch", QJsonObject::fromVariantMap(m_lastSubtitleSearch)},
         {"currentId", m_currentIndex >= 0 && m_currentIndex < m_entries.size() ?
             m_entries.at(m_currentIndex).id : QString()},
         {"entries", entries},
@@ -2134,4 +2141,32 @@ bool EpisodeFolder::setSubtitleLinkForFile(const QString &file, const QVariantMa
 bool EpisodeFolder::clearSubtitleLinkForFile(const QString &file)
 {
     return setSubtitleLinkForFile(file, {});
+}
+
+bool EpisodeFolder::rememberSubtitleSearch(const QVariantMap &link, int episode)
+{
+    const auto previous = m_lastSubtitleSearch;
+    m_lastSubtitleSearch = link;
+    m_lastSubtitleSearch.insert("episode", episode);
+    if (!writeLibrary()) { m_lastSubtitleSearch = previous; reportPersistenceError(); return false; }
+    emit libraryChanged();
+    return true;
+}
+
+int EpisodeFolder::defaultAudioTrackForFile(const QString &file) const
+{
+    const int index = findEntryForFile(file, nullptr);
+    return index < 0 ? -1 : m_entries.at(index).audioTrack;
+}
+
+bool EpisodeFolder::setDefaultAudioTrackForFile(const QString &file, int track)
+{
+    const int index = findEntryForFile(file, nullptr);
+    if (index < 0 || track < -1) return false;
+    auto &entry = m_entries[index];
+    const int previous = entry.audioTrack;
+    entry.audioTrack = track;
+    if (!writeLibrary()) { entry.audioTrack = previous; reportPersistenceError(); return false; }
+    notifyEntryChanged(true);
+    return true;
 }

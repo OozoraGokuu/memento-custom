@@ -403,9 +403,12 @@ Page {
                         }
                         TextField {
                             Layout.alignment: Qt.AlignRight
-                            placeholderText: qsTr("Regex")
+                            id: removalRegex
+                            placeholderText: qsTr("Regex or /pattern/flags")
                             text: MementoSettings.searchRemoveRegex
-                            onEditingFinished: MementoSettings.searchRemoveRegex = text
+                            onTextEdited: MementoSettings.searchRemoveRegex = text
+                            ToolTip.visible: activeFocus && MementoSettings.subtitleRegexError(text).length > 0
+                            ToolTip.text: MementoSettings.subtitleRegexError(text)
                         }
                     }
                 }

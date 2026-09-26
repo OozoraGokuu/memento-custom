@@ -46,6 +46,7 @@ Icon "logo.ico"
 OutFile "${MEMENTO_INSTALLER_OUTFILE}"
 
 Page license
+Page directory
 Page instfiles
 
 Var InstallState

@@ -8,7 +8,6 @@ ListView {
 
     required property SubtitleListModel subtitleListModel
     readonly property ItemSelectionModel selectionModel: root.subtitleListModel?.selectionModel ?? null
-    readonly property var regexFilter: Utils.safeRegex(MementoSettings.searchRemoveRegex, "g")
 
     property real delay: 0
     property color textColor: "white"
@@ -81,7 +80,7 @@ ListView {
             let lines = rows.map(function(i) {
                 let index = root.subtitleListModel.index(i, 0);
                 let text = root.subtitleListModel.data(index, SubtitleListModel.TextRole);
-                return text.replace(root.regexFilter, "");
+                return MementoSettings.filterSubtitleText(text, MementoSettings.searchRemoveRegex);
             });
             let text = lines.filter(str => str.length > 0).join("\n");
             if (text.length > 0)
@@ -173,7 +172,7 @@ ListView {
                 font.hintingPreference: root.textFont.hintingPreference
                 font.styleName: root.textFont.styleName
 
-                text: model.text.replace(root.regexFilter, "")
+                text: MementoSettings.filterSubtitleText(model.text, MementoSettings.searchRemoveRegex)
             }
         }
 

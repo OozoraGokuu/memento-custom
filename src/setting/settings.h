@@ -19,6 +19,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #pragma once
+#include <QRegularExpression>
 
 #include <QObject>
 
@@ -560,6 +561,9 @@ public:
     /**
      * @brief Loads saved settings from disc.
      */
+    static QRegularExpression subtitleRegex(const QString &pattern);
+    Q_INVOKABLE QString filterSubtitleText(QString text, const QString &pattern) const;
+    Q_INVOKABLE QString subtitleRegexError(const QString &pattern) const;
     Q_INVOKABLE void load();
 
     /**

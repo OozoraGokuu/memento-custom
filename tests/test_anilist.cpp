@@ -155,6 +155,17 @@ private slots:
         const QVariantMap kitsu{{"provider", "kitsunekko"}, {"name", "Show"},
             {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Show/"}};
         QVERIFY(library.setSubtitleLinkForFile(a.fileName(), jimaku));
+        QVERIFY(library.setDefaultAudioTrackForFile(a.fileName(), 2));
+        QCOMPARE(library.defaultAudioTrackForFile(a2.fileName()), 2);
+        QCOMPARE(library.defaultAudioTrackForFile(b.fileName()), -1);
+        QVERIFY(!library.setDefaultAudioTrackForFile("/outside.mkv", 3));
+        QVERIFY(library.rememberSubtitleSearch(kitsu, 1));
+        { EpisodeFolder loaded;
+          QCOMPARE(loaded.defaultAudioTrackForFile(a2.fileName()), 2);
+          QCOMPARE(loaded.lastSubtitleSearch().value("episode").toInt(), 1);
+          QCOMPARE(loaded.lastSubtitleSearch().value("sha"), kitsu.value("sha")); }
+        QVERIFY(library.setDefaultAudioTrackForFile(a2.fileName(), 1));
+        QCOMPARE(library.defaultAudioTrackForFile(a.fileName()), 1);
         QCOMPARE(library.subtitleLinkForFile(a2.fileName()), jimaku);
         QVERIFY(library.subtitleLinkForFile(b.fileName()).isEmpty());
         QVERIFY(!library.setSubtitleLinkForFile("/outside.mkv", kitsu));

@@ -222,7 +222,7 @@ namespace Keys
         constexpr bool MIDDLE_MOUSE_SCAN_DEFAULT = false;
 
         constexpr const char *METHOD = "method";
-        constexpr Setting::SearchMethod METHOD_DEFAULT = Setting::SearchMethodHover;
+        constexpr Setting::SearchMethod METHOD_DEFAULT = Setting::SearchMethodModifier;
 
         constexpr const char *DELAY = "delay";
         constexpr int DELAY_DEFAULT = 250;

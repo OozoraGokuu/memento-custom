@@ -40,6 +40,7 @@ MenuBar {
 
     signal ocrModeRequested()
     signal jimakuSearchRequested()
+    signal nextSubtitleSearchRequested()
     signal torrentSearchRequested()
 
     Connections {
@@ -446,6 +447,14 @@ MenuBar {
             enabled: !JimakuClient.busy && root.player.state.path.length > 0
             shortcut: "Ctrl+Shift+J"
             onTriggered: JimakuClient.fetchForCurrentMedia()
+        }
+
+        Action {
+            text: qsTr("Fetch subtitle from previous search — episode %1")
+                .arg((EpisodeLibrary.lastSubtitleSearch.episode ?? -1) + 1)
+            enabled: (EpisodeLibrary.lastSubtitleSearch.episode ?? -1) >= 0 &&
+                     root.player.state.path.length > 0 && !JimakuClient.busy && !KitsunekkoClient.busy
+            onTriggered: root.nextSubtitleSearchRequested()
         }
 
         Action {

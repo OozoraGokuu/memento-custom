@@ -201,6 +201,10 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persis
             error(tr("GitHub returned an incomplete subtitle list.")); return;
         }
         m_files = parseFiles(data, entry.value("prefix").toString(), all ? -1 : episode);
+        if (m_context && episode >= 0 && !m_files.isEmpty())
+            m_context->episodeLibrary()->rememberSubtitleSearch(
+                {{"provider", "kitsunekko"}, {"name", m_entryName},
+                 {"sha", entry.value("sha")}, {"prefix", entry.value("prefix")}}, episode);
         m_busy = false;
         m_status = m_files.isEmpty() ? tr("No files for this episode. Try Show all files.") :
             tr("%1 Japanese subtitle files. Only the file you select will be downloaded.").arg(m_files.size());

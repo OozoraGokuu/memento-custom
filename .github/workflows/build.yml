@@ -238,6 +238,7 @@ jobs:
       - name: Build from clean checkout
         run: |
           flatpak-builder --user --force-clean --disable-rofiles-fuse --repo=flatpak-repo --default-branch=stable flatpak-build linux/flatpak/io.github.mu0dev.MementoCustom.json
+          cp linux/flatpak/install-memento.sh install-memento.sh
           python3 .github/scripts/audit-distribution.py flatpak-build/files
           flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo flatpak-repo Memento_Linux_x86_64.flatpak io.github.mu0dev.MementoCustom stable
       - name: Preserve completed dependencies after a failed build
@@ -257,7 +258,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: linux-x86_64-package
-          path: Memento_Linux_x86_64.flatpak
+          path: |
+            Memento_Linux_x86_64.flatpak
+            install-memento.sh
           if-no-files-found: error
           retention-days: 7
 

@@ -78,6 +78,7 @@ private:
 
     /* The application context */
     Context *m_context{nullptr};
+    bool m_restoringAudio{false};
 
     /**
      * @brief Holds data about auto pausing.

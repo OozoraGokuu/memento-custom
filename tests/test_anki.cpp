@@ -64,6 +64,20 @@ private slots:
         });
     }
 
+    void subtitleRegexUsesUnicodeAndReportsInvalidPatterns()
+    {
+        Settings settings;
+        QCOMPARE(settings.searchMethod(), Setting::SearchMethodModifier);
+        QCOMPARE(settings.searchModifier(), Setting::ModifierShift);
+        QCOMPARE(settings.filterSubtitleText(QStringLiteral("猫ABC犬XYZ"), QStringLiteral("[A-Z]+")), QStringLiteral("猫犬"));
+        QCOMPARE(settings.filterSubtitleText(QStringLiteral("猫ABC犬"), QStringLiteral("\\p{Latin}+")), QStringLiteral("猫犬"));
+        QCOMPARE(settings.filterSubtitleText("ABC abc", "/abc/gi"), QString(" "));
+        QCOMPARE(settings.filterSubtitleText("a\nb", "/^a$/m"), QString("\nb"));
+        QCOMPARE(settings.filterSubtitleText("keep", "["), QString("keep"));
+        QVERIFY(!settings.subtitleRegexError("[").isEmpty());
+        QVERIFY(settings.subtitleRegexError("\\p{Han}+").isEmpty());
+    }
+
     void downloadedTrackReplacesNavigationTimeline()
     {
         Context context;

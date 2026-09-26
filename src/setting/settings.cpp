@@ -2649,3 +2649,37 @@ void Settings::setBehaviorSubtitleAutoCopy(bool value)
     m_behavior.subtitleAutoCopy = value;
     emit behaviorSubtitleAutoCopyChanged(value);
 }
+
+QRegularExpression Settings::subtitleRegex(const QString &pattern)
+{
+    QString expression = pattern;
+    QRegularExpression::PatternOptions options = QRegularExpression::UseUnicodePropertiesOption;
+    // Accept both raw PCRE patterns and the /pattern/flags notation.
+    if (expression.startsWith('/')) {
+        const int end = expression.lastIndexOf('/');
+        if (end > 0) {
+            const QString flags = expression.mid(end + 1);
+            if (QRegularExpression("^[gimsu]*$").match(flags).hasMatch()) {
+                if (flags.contains('i')) options |= QRegularExpression::CaseInsensitiveOption;
+                if (flags.contains('m')) options |= QRegularExpression::MultilineOption;
+                if (flags.contains('s')) options |= QRegularExpression::DotMatchesEverythingOption;
+                expression = expression.mid(1, end - 1);
+            }
+        }
+    }
+    return QRegularExpression(expression, options);
+}
+
+QString Settings::filterSubtitleText(QString text, const QString &pattern) const
+{
+    if (pattern.isEmpty()) return text;
+    const auto regex = subtitleRegex(pattern);
+    if (regex.isValid()) text.remove(regex);
+    return text;
+}
+
+QString Settings::subtitleRegexError(const QString &pattern) const
+{
+    const auto regex = subtitleRegex(pattern);
+    return regex.isValid() ? QString() : regex.errorString();
+}

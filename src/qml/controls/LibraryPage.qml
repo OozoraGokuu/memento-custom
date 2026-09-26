@@ -10,6 +10,15 @@ Page {
     id: root
 
     required property MpvPlayer player
+    readonly property var filteredLibrary: {
+        const query = titleSearch.text.trim().toLowerCase();
+        let entries = EpisodeLibrary.library.map(function(item, index) {
+            return Object.assign({}, item, { libraryIndex: index });
+        }).filter(function(item) { return item.title.toLowerCase().includes(query); });
+        if (librarySort.currentIndex === 1) entries.sort(function(a, b) { return a.title.localeCompare(b.title); });
+        if (librarySort.currentIndex === 2) entries = entries.filter(function(item) { return item.watchedCount < item.totalCount; });
+        return entries;
+    }
     readonly property string episodeFilterEntryId:
         EpisodeLibrary.currentEntry.id ?? ""
 
@@ -226,17 +235,32 @@ Page {
             }
         }
 
-        ListView {
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: 14
+            Layout.rightMargin: 14
+            Layout.bottomMargin: 8
+            TextField {
+                id: titleSearch
+                Layout.fillWidth: true
+                placeholderText: qsTr("Search your library")
+                selectByMouse: true
+            }
+            ComboBox { id: librarySort; model: [qsTr("Library order"), qsTr("A–Z"), qsTr("Unfinished")] }
+        }
+
+        GridView {
             id: libraryList
+            cellWidth: Math.max(220, width / Math.max(1, Math.floor(width / 250)))
+            cellHeight: 112
 
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(contentHeight, root.height * 0.38)
             Layout.minimumHeight: EpisodeLibrary.library.length > 0 ? 82 : 126
             Layout.leftMargin: 8
             Layout.rightMargin: 8
-            spacing: 4
             clip: true
-            model: EpisodeLibrary.library
+            model: root.filteredLibrary
             currentIndex: EpisodeLibrary.currentIndex
 
             ScrollBar.vertical: ScrollBar {
@@ -249,18 +273,18 @@ Page {
                 required property var modelData
                 required property int index
 
-                readonly property bool current: index === EpisodeLibrary.currentIndex
+                readonly property bool current: modelData.libraryIndex === EpisodeLibrary.currentIndex
                 readonly property real watchedRatio: modelData.totalCount > 0 ?
                     modelData.watchedCount / modelData.totalCount : 0
 
-                width: ListView.view.width
-                implicitHeight: 76
+                width: GridView.view.cellWidth - 8
+                height: GridView.view.cellHeight - 8
                 leftPadding: 12
                 rightPadding: 12
                 topPadding: 9
                 bottomPadding: 9
                 highlighted: current
-                onClicked: EpisodeLibrary.currentIndex = index
+                onClicked: EpisodeLibrary.currentIndex = modelData.libraryIndex
 
                 background: Rectangle {
                     radius: 7
@@ -442,6 +466,14 @@ Page {
                             EpisodeLibrary.currentEntry.nextEpisodeIndex)
                     }
 
+                    Label {
+                        visible: (EpisodeLibrary.currentEntry.audioTrack ?? -1) >= 0
+                        text: qsTr("Audio: %1").arg(EpisodeLibrary.currentEntry.audioTrack)
+                        color: MementoPalette.placeholderText
+                        ToolTip.visible: audioHelp.hovered
+                        ToolTip.text: qsTr("Choosing an audio track while playing remembers its number for every episode in this library entry.")
+                        HoverHandler { id: audioHelp }
+                    }
                     Button {
                         text: qsTr("AniList…")
                         onClicked: aniListDialog.open()

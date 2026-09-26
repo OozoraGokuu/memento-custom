@@ -32,6 +32,7 @@ class EpisodeFolder : public QObject
 {
     Q_OBJECT
 
+    Q_PROPERTY(QVariantMap lastSubtitleSearch READ lastSubtitleSearch NOTIFY libraryChanged)
     Q_PROPERTY(QVariantList library READ library NOTIFY libraryChanged)
     Q_PROPERTY(QVariantList episodes READ episodes NOTIFY episodesChanged)
     Q_PROPERTY(QVariantMap currentEntry READ currentEntry NOTIFY selectionChanged)
@@ -85,6 +86,10 @@ public:
     /** Stable identity and original filename for a playing local/torrent episode. */
     QVariantMap playbackInfo(const QString &file) const;
 
+    QVariantMap lastSubtitleSearch() const { return m_lastSubtitleSearch; }
+    Q_INVOKABLE bool rememberSubtitleSearch(const QVariantMap &link, int episode);
+    Q_INVOKABLE int defaultAudioTrackForFile(const QString &file) const;
+    Q_INVOKABLE bool setDefaultAudioTrackForFile(const QString &file, int track);
     Q_INVOKABLE QVariantMap subtitleLinkForFile(const QString &file) const;
     Q_INVOKABLE bool setSubtitleLinkForFile(const QString &file, const QVariantMap &link);
     Q_INVOKABLE bool clearSubtitleLinkForFile(const QString &file);
@@ -122,6 +127,7 @@ private:
         QSet<QString> watched;
         QString lastPlayed;
         QVariantMap subtitleLink;
+        int audioTrack{-1};
     };
 
     [[nodiscard]] static QString normalizedPath(const QString &value);
@@ -163,6 +169,7 @@ private:
         bool selectEntry
     );
 
+    QVariantMap m_lastSubtitleSearch;
     QVector<Entry> m_entries;
     int m_currentIndex{-1};
     QString m_lastError;
