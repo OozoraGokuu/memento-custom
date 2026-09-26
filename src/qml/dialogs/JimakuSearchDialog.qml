@@ -198,6 +198,7 @@ Dialog {
                     if (!EpisodeLibrary.clearSubtitleLinkForFile(root.player.state.path))
                         errorLabel.text = qsTr("Could not remove the saved link.");
                     root.browsingLink = false;
+                    root.refreshLink();
                     root.selectedEntryIndex = -1;
                     root.client.clearSearch();
                 }

@@ -12,15 +12,14 @@ An unofficial Windows, Linux and macOS build of [Memento](https://github.com/rip
 
 **Windows 10 (1903+) / 11 x86_64:** download `Memento_Windows_x86_64_Installer.exe`, or extract the entire `Memento_Windows_x86_64.zip` and run `memento.exe`. Keep its DLL, QML, dictionary, certificate and license files together. The installer uses the name **Memento Study Edition**. Windows builds are unsigned. CI runs on Windows Server 2025; desktop Windows 11 hardware is not part of the automated test environment.
 
-**Linux x86_64:** install Flatpak, then run:
+**Linux x86_64:** install Flatpak and download `install-memento.sh` and `Memento_Linux_x86_64.flatpak` into the same folder. The helper shows the user and system installation locations and lets you choose:
 
 ```sh
-flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./Memento_Linux_x86_64.flatpak
+bash ./install-memento.sh
 flatpak run io.github.mu0dev.MementoCustom
 ```
 
-This Flatpak has its own app ID, separate from upstream Memento. Export folders outside your home directory may require a Flatpak filesystem permission. Upstream Flathub/AUR builds do not include this fork's additions.
+Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/lib/flatpak`) locations; the helper does not install into arbitrary folders. This Flatpak has its own app ID, separate from upstream Memento. Export folders outside your home directory may require a Flatpak filesystem permission. Upstream Flathub/AUR builds do not include this fork's additions.
 
 **macOS 15 or later:** choose `Memento_macOS_arm64.zip` for Apple Silicon (M1 or newer), or `Memento_macOS_x86_64.zip` for Intel. Extract the ZIP and drag **Memento.app** into Applications. No Homebrew or MacPorts installation is needed. These builds use an ad-hoc signature and are not Apple-notarized; macOS may require approval in System Settings → Privacy & Security after the first launch attempt.
 

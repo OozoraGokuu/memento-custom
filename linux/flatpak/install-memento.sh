@@ -20,4 +20,5 @@ elif [[ -z "$scope" ]]; then
     case "$choice" in ''|1) scope=--user;; 2) scope=--system;; *) exit 1;; esac
 fi
 case "$scope" in --user|--system) ;; *) printf 'Use --user or --system.\n' >&2; exit 1;; esac
+flatpak remote-add "$scope" --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 exec flatpak install "$scope" "$bundle"
