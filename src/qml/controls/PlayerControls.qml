@@ -18,6 +18,7 @@ Rectangle {
      * the same direction changes that gesture to a three-second relative seek.
      */
     function subtitleAwareSeek(direction) {
+        if (!Number.isFinite(root.player.state.timePosition)) return;
         if (subtitleSeekRepeatTimer.running &&
             root.lastSubtitleSeekDirection === direction)
         {
@@ -41,6 +42,14 @@ Rectangle {
                 root.player.controller.seek(target);
         } else {
             root.player.controller.subtitleSeek(direction, true);
+        }
+    }
+
+    Connections {
+        target: root.player.state
+        function onPathChanged() {
+            subtitleSeekRepeatTimer.stop();
+            root.lastSubtitleSeekDirection = 0;
         }
     }
 
