@@ -337,6 +337,10 @@ private slots:
         const QString stream = library.episodePath(0);
         QVERIFY(!stream.isEmpty());
         QVERIFY(library.isTransientStream(stream));
+        const QVariantMap link{{"provider", "jimaku"}, {"name", "Torrent show"}, {"entryId", 42}};
+        QVERIFY(library.setSubtitleLinkForFile(stream, link));
+        QCOMPARE(library.subtitleLinkForFile(stream), link);
+        QVERIFY(library.clearSubtitleLinkForFile(stream));
         QVERIFY(!library.isTransientStream(source));
 
         library.removeEntry(index, true);

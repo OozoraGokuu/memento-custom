@@ -74,6 +74,7 @@ public:
 
     /** Load subtitle files for a selected title and optional episode. */
     Q_INVOKABLE void selectEntry(int resultIndex, int episode = -1);
+    Q_INVOKABLE void openLinkedEntry(const QVariantMap &link, int episode, bool all = false);
 
     /**
      * Load every subtitle file for a selected title while retaining the
@@ -178,7 +179,7 @@ private:
     [[nodiscard]] bool safeDownloadUrl(const QUrl &url) const;
 
     void useSelectedFile(quint64 generation);
-    void selectEntryFiles(int resultIndex, int episode, bool withEpisode);
+    void selectEntryFiles(int resultIndex, int episode, bool withEpisode, bool persist = true);
     void setSearchEntries(QVector<QJsonObject> entries);
     void setBrowseFiles(QVector<FileInfo> files);
 

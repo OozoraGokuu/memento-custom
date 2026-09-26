@@ -1,3 +1,5 @@
+#include "manager/subtitlelistmanager.h"
+#include <QTemporaryDir>
 #include <QDir>
 #include <QGuiApplication>
 #include <QJsonArray>
@@ -60,6 +62,37 @@ private slots:
                 socket->disconnectFromHost();
             });
         });
+    }
+
+    void downloadedTrackReplacesNavigationTimeline()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        SubtitleListManager manager(&context);
+        QTemporaryDir folder;
+        QFile oldFile(folder.filePath("old.srt")), downloaded(folder.filePath("downloaded.srt"));
+        QVERIFY(oldFile.open(QIODevice::WriteOnly));
+        oldFile.write("1\n00:00:01,000 --> 00:00:02,000\nOld\n\n"); oldFile.close();
+        QVERIFY(downloaded.open(QIODevice::WriteOnly));
+        downloaded.write("1\n00:00:08,000 --> 00:00:09,000\nNew\n\n"); downloaded.close();
+        auto *oldTrack = new MpvTrack(&player), *newTrack = new MpvTrack(&player);
+        oldTrack->setId(1); oldTrack->setExternal(true); oldTrack->setExternalFilename(oldFile.fileName());
+        newTrack->setId(2); newTrack->setExternal(true); newTrack->setExternalFilename(downloaded.fileName());
+        player.state()->setPath(folder.filePath("video.mkv"));
+        player.state()->setSubtitleTracks({oldTrack}); player.state()->setSid(1);
+        QTRY_VERIFY(context.subtitleLists()->primary() && context.subtitleLists()->primary()->fullTimelineReady());
+        QCOMPARE(context.subtitleLists()->primary()->adjacentSubtitleStart(0, 1), 1.0);
+        auto *retainedTrack = new MpvTrack(&player);
+        retainedTrack->setId(1); retainedTrack->setExternal(true); retainedTrack->setExternalFilename(oldFile.fileName());
+        player.state()->setSubtitleTracks({retainedTrack, newTrack});
+        player.state()->setSecondarySid(1); player.state()->setSid(2);
+        QTRY_VERIFY(context.subtitleLists()->primary() && context.subtitleLists()->primary()->fullTimelineReady());
+        QCOMPARE(context.subtitleLists()->primary()->adjacentSubtitleStart(0, 1), 8.0);
+        QCOMPARE(context.subtitleLists()->secondary()->adjacentSubtitleStart(0, 1), 1.0);
+        player.state()->setSid(99);
+        QVERIFY(!context.subtitleLists()->primary());
+        context.setPlayer(nullptr);
     }
 
     void connectionFieldsAndNoteOverRealHttp()

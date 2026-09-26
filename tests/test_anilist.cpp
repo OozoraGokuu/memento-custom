@@ -141,6 +141,43 @@ private slots:
         };
         c.authenticate("different-test-token"); QCOMPARE(c.pendingCount(), 0); QCOMPARE(c.username(), QString("Other"));
     }
+    void subtitleLinksPersistPerLibraryEntry() {
+        QTemporaryDir first, second;
+        QFile a(first.filePath("Show - 01.mkv")), a2(first.filePath("Show - 02.mkv")), b(second.filePath("Other - 01.mkv"));
+        for (QFile *file : {&a, &a2, &b}) {
+            QVERIFY(file->open(QIODevice::WriteOnly)); file->write("test"); file->close();
+        }
+        EpisodeFolder library;
+        QVERIFY(library.addFolder(QUrl::fromLocalFile(first.path())) >= 0);
+        QVERIFY(library.addFolder(QUrl::fromLocalFile(second.path())) >= 0);
+        QVERIFY(library.subtitleLinkForFile(a.fileName()).isEmpty());
+        const QVariantMap jimaku{{"provider", "jimaku"}, {"name", "Show"}, {"entryId", 123}};
+        const QVariantMap kitsu{{"provider", "kitsunekko"}, {"name", "Show"},
+            {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Show/"}};
+        QVERIFY(library.setSubtitleLinkForFile(a.fileName(), jimaku));
+        QCOMPARE(library.subtitleLinkForFile(a2.fileName()), jimaku);
+        QVERIFY(library.subtitleLinkForFile(b.fileName()).isEmpty());
+        QVERIFY(!library.setSubtitleLinkForFile("/outside.mkv", kitsu));
+        { EpisodeFolder loaded; QCOMPARE(loaded.subtitleLinkForFile(a.fileName()), jimaku); }
+        QVERIFY(library.setSubtitleLinkForFile(a2.fileName(), kitsu));
+        { EpisodeFolder loaded; QCOMPARE(loaded.subtitleLinkForFile(a.fileName()), kitsu); }
+        QVERIFY(library.clearSubtitleLinkForFile(a.fileName()));
+        { EpisodeFolder loaded; QVERIFY(loaded.subtitleLinkForFile(a2.fileName()).isEmpty()); }
+        // An old version-1 library without the optional field still loads.
+        QFile json(QDir(DirectoryUtils::getConfigDir()).filePath("episode-library.json"));
+        QVERIFY(json.open(QIODevice::ReadOnly));
+        auto root = QJsonDocument::fromJson(json.readAll()).object(); json.close();
+        auto entries = root.value("entries").toArray();
+        for (int i = 0; i < entries.size(); ++i) {
+            auto entry = entries[i].toObject(); entry.remove("subtitleLink"); entries[i] = entry;
+        }
+        root.insert("entries", entries);
+        QVERIFY(json.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        json.write(QJsonDocument(root).toJson()); json.close();
+        EpisodeFolder legacy;
+        QVERIFY(legacy.containsFile(a.fileName()));
+        QVERIFY(legacy.subtitleLinkForFile(a.fileName()).isEmpty());
+    }
     void playingIdentityIndependentOfLibrarySelection() {
         EpisodeFolder library;
         const QString first = m_dir.filePath("First"), second = m_dir.filePath("Second");

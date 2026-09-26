@@ -10,14 +10,32 @@ Dialog {
 
     required property MpvPlayer player
     property int selectedEntryIndex: -1
+    property var savedLink: ({})
+    property bool browsingLink: false
+
+    function refreshLink() {
+        savedLink = EpisodeLibrary.subtitleLinkForFile(root.player.state.path);
+    }
+
+    function browseLink(all) {
+        errorLabel.text = "";
+        root.browsingLink = true;
+        root.selectedEntryIndex = -1;
+        root.client.openLinkedEntry(root.savedLink, episodeBox.value, all);
+    }
     readonly property bool useJimaku: providerBox.currentIndex === 0
     readonly property var client: useJimaku ? JimakuClient : KitsunekkoClient
 
     function openForCurrentMedia() {
         errorLabel.text = "";
-        root.client.clearSearch();
+        JimakuClient.clearSearch();
+        KitsunekkoClient.clearSearch();
+        root.refreshLink();
+        root.browsingLink = false;
+        if (savedLink.provider === "jimaku") providerBox.currentIndex = 0;
+        else if (savedLink.provider === "kitsunekko") providerBox.currentIndex = 1;
         root.selectedEntryIndex = -1;
-        queryField.text = JimakuClient.suggestedTitle();
+        queryField.text = savedLink.name || JimakuClient.suggestedTitle();
         episodeBox.value = JimakuClient.suggestedEpisode();
         root.open();
         Qt.callLater(function() {
@@ -42,6 +60,7 @@ Dialog {
         errorLabel.text = "";
         if (root.useJimaku) JimakuClient.apiKey = apiKeyField.text;
         root.selectedEntryIndex = -1;
+        root.browsingLink = false;
         root.client.search(queryField.text);
     }
 
@@ -54,6 +73,18 @@ Dialog {
     standardButtons: Dialog.Close
     closePolicy: Popup.CloseOnEscape
     onClosed: { JimakuClient.cancel(); KitsunekkoClient.cancel(); }
+
+    Connections {
+        target: EpisodeLibrary
+        function onLibraryChanged() { root.refreshLink(); }
+    }
+
+    Connections {
+        target: root.player.state
+        function onPathChanged() {
+            if (root.visible) root.openForCurrentMedia();
+        }
+    }
 
     Connections {
         target: root.client
@@ -82,6 +113,7 @@ Dialog {
                 onActivated: {
                     JimakuClient.cancel();
                     KitsunekkoClient.cancel();
+                    root.browsingLink = false;
                     root.client.clearSearch();
                     root.selectedEntryIndex = -1;
                     errorLabel.text = "";
@@ -93,6 +125,7 @@ Dialog {
                 enabled: !root.client.busy && queryField.text.trim().length > 0
                 onClicked: {
                     root.selectedEntryIndex = -1;
+                    root.browsingLink = false;
                     KitsunekkoClient.refreshCatalog(queryField.text);
                 }
             }
@@ -100,6 +133,46 @@ Dialog {
                 text: qsTr("Open website")
                 flat: true
                 onClicked: Qt.openUrlExternally(root.useJimaku ? "https://jimaku.cc/" : "https://subtitles.ajatt.top/")
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            visible: !!root.savedLink.provider
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Linked subtitle title: %1 — %2")
+                    .arg(root.savedLink.provider || "").arg(root.savedLink.name || "")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+            }
+            Button {
+                text: qsTr("Browse episode subtitles")
+                enabled: !root.client.busy
+                onClicked: {
+                    JimakuClient.cancel(); KitsunekkoClient.cancel();
+                    providerBox.currentIndex = root.savedLink.provider === "jimaku" ? 0 : 1;
+                    if (root.useJimaku) JimakuClient.apiKey = apiKeyField.text;
+                    root.browseLink(false);
+                }
+            }
+            Button {
+                text: qsTr("Change link")
+                onClicked: {
+                    root.client.clearSearch(); root.browsingLink = false;
+                    root.selectedEntryIndex = -1;
+                    queryField.forceActiveFocus(); queryField.selectAll();
+                }
+            }
+            Button {
+                text: qsTr("Unlink")
+                onClicked: {
+                    if (!EpisodeLibrary.clearSubtitleLinkForFile(root.player.state.path))
+                        errorLabel.text = qsTr("Could not remove the saved link.");
+                    root.browsingLink = false;
+                    root.selectedEntryIndex = -1;
+                    root.client.clearSearch();
+                }
             }
         }
 
@@ -281,6 +354,7 @@ Dialog {
                             highlighted: index === root.selectedEntryIndex
                             enabled: !root.client.busy
                             onClicked: {
+                                root.browsingLink = false;
                                 root.selectedEntryIndex = index;
                                 errorLabel.text = "";
                                 root.client.selectEntry(index, episodeBox.value);
@@ -358,19 +432,19 @@ Dialog {
                                 qsTr("Refresh all files") :
                                 qsTr("Refresh episode %1").arg(episodeBox.value)
                             flat: true
-                            visible: root.selectedEntryIndex >= 0
+                            visible: root.browsingLink || root.selectedEntryIndex >= 0
                             enabled: !root.client.busy
-                            onClicked: root.client.selectEntry(
+                            onClicked: root.browsingLink ? root.browseLink(false) : root.client.selectEntry(
                                 root.selectedEntryIndex, episodeBox.value)
                         }
 
                         Button {
                             text: qsTr("Show all files")
                             flat: true
-                            visible: root.selectedEntryIndex >= 0 &&
+                            visible: (root.browsingLink || root.selectedEntryIndex >= 0) &&
                                      root.client.selectedEpisode >= 0
                             enabled: !root.client.busy
-                            onClicked: root.client.selectEntryAllFiles(
+                            onClicked: root.browsingLink ? root.browseLink(true) : root.client.selectEntryAllFiles(
                                 root.selectedEntryIndex,
                                 root.client.selectedEpisode)
                         }
@@ -471,7 +545,7 @@ Dialog {
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
                             color: MementoPalette.placeholderText
-                            text: root.selectedEntryIndex < 0 ?
+                            text: !root.browsingLink && root.selectedEntryIndex < 0 ?
                                 qsTr("Choose a title first.") :
                                 qsTr("No matching subtitle files are shown.")
                         }

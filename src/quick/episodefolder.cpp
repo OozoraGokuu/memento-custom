@@ -1021,6 +1021,7 @@ QStringList EpisodeFolder::rescan(int entryIndex)
                 {
                     duplicate.lastPlayed = entry.lastPlayed;
                 }
+                if (duplicate.subtitleLink.isEmpty()) duplicate.subtitleLink = entry.subtitleLink;
                 duplicate.source = result.source;
 
                 const bool removedCurrent = m_currentIndex == index;
@@ -1442,6 +1443,7 @@ QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
         {"availableCount", availableCount(entry)},
         {"nextEpisodeIndex", nextEpisode},
         {"lastPlayedIndex", lastPlayedIndex},
+        {"subtitleLink", entry.subtitleLink},
     };
     if (entry.type == "torrent")
     {
@@ -1793,6 +1795,7 @@ void EpisodeFolder::loadLibrary()
         const QStringList watched = jsonStringList(object.value("watched"));
         entry.watched = QSet<QString>(watched.cbegin(), watched.cend());
         entry.lastPlayed = jsonString(object, "lastPlayed");
+        entry.subtitleLink = object.value("subtitleLink").toObject().toVariantMap();
 
         if (entry.id.isEmpty() || entry.title.isEmpty() ||
             (entry.type != "folder" && entry.type != "torrent"))
@@ -1856,6 +1859,7 @@ void EpisodeFolder::loadLibrary()
             {
                 existing.lastPlayed = m_entries.at(index).lastPlayed;
             }
+            if (existing.subtitleLink.isEmpty()) existing.subtitleLink = m_entries.at(index).subtitleLink;
             existing.source = result.source;
             m_entries.removeAt(index);
             migratedTorrent = true;
@@ -2021,6 +2025,7 @@ bool EpisodeFolder::writeLibrary() const
             }())},
             {"watched", QJsonArray::fromStringList(watched)},
             {"lastPlayed", entry.lastPlayed},
+            {"subtitleLink", QJsonObject::fromVariantMap(entry.subtitleLink)},
         });
     }
 
@@ -2100,4 +2105,33 @@ QVariantMap EpisodeFolder::playbackInfo(const QString &file) const
     const Entry &item = m_entries.at(entry);
     return {{"key", item.id}, {"title", item.title},
         {"filename", item.relativePaths.at(episode)}};
+}
+
+QVariantMap EpisodeFolder::subtitleLinkForFile(const QString &file) const
+{
+    const int index = findEntryForFile(file, nullptr);
+    return index < 0 ? QVariantMap{} : m_entries.at(index).subtitleLink;
+}
+
+bool EpisodeFolder::setSubtitleLinkForFile(const QString &file, const QVariantMap &link)
+{
+    const int index = findEntryForFile(file, nullptr);
+    if (index < 0) return false;
+    Entry &entry = m_entries[index];
+    const QVariantMap previous = entry.subtitleLink;
+    if (previous == link) return true;
+    entry.subtitleLink = link;
+    if (!writeLibrary())
+    {
+        entry.subtitleLink = previous;
+        reportPersistenceError();
+        return false;
+    }
+    notifyEntryChanged(true);
+    return true;
+}
+
+bool EpisodeFolder::clearSubtitleLinkForFile(const QString &file)
+{
+    return setSubtitleLinkForFile(file, {});
 }

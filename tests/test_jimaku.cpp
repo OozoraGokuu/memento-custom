@@ -1,9 +1,19 @@
+#include "state/context.h"
+#include <QGuiApplication>
+#include <QTemporaryDir>
+#include <QStandardPaths>
+#include <QUuid>
+#include <clocale>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QFile>
 #include <QScopeGuard>
+#include <QSignalSpy>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QNetworkReply>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
@@ -53,6 +63,67 @@ class JimakuClientTest : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase() {
+        std::setlocale(LC_NUMERIC, "C");
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName("subtitle-provider-test-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getDataDir()));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getConfigDir()));
+        Dictionary::createDatabaseInstance();
+    }
+    void explicitSelectionPersistsForPlayingLibrary() {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        QFile file(folder.filePath("Show - 23.mkv"));
+        QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test"); file.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        player.state()->setPath(file.fileName());
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key"; client.m_baseUrl = QUrl("http://127.0.0.1:9");
+        client.setSearchEntries({QJsonObject{{"id", 123}, {"name", "Show"}}});
+        client.selectEntry(0, 23);
+        const auto link = context.episodeLibrary()->subtitleLinkForFile(file.fileName());
+        QCOMPARE(link.value("name").toString(), QString("Show"));
+        QCOMPARE(link.value("provider").toString(), QString("jimaku")); QCOMPARE(link.value("entryId").toInt(), 123);
+        client.cancel();
+        player.state()->setPath("/outside.mkv");
+        client.selectEntry(0, 23); client.cancel();
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(file.fileName()), link);
+        context.setPlayer(nullptr);
+    }
+
+    void linkedTitleOpensDirectlyAndFailsSafely()
+    {
+        JimakuClient client(nullptr);
+        client.m_apiKey = "test-key";
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        connect(&server, &QTcpServer::newConnection, &server, [&server] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [socket] {
+                socket->readAll();
+                socket->write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        });
+        client.m_baseUrl = QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        QSignalSpy failed(&client, &JimakuClient::failed);
+        client.openLinkedEntry({{"provider", "jimaku"}, {"name", "Show"}, {"entryId", 123}}, 23);
+        QVERIFY(client.m_operation == JimakuClient::Operation::ManualFiles);
+        QVERIFY(client.m_reply);
+        QCOMPARE(client.m_reply->url().path(), QString("/api/entries/123/files"));
+        QCOMPARE(client.selectedEpisode(), 23);
+        QCOMPARE(client.selectedEntryName(), QString("Show"));
+        QTRY_VERIFY(!client.busy());
+        QCOMPARE(failed.size(), 1);
+        client.openLinkedEntry({{"provider", "jimaku"}}, 23);
+        QCOMPARE(failed.size(), 2);
+        QVERIFY(!client.busy());
+    }
+
     void extractsEpisodeAndCleansReleaseNames()
     {
         QCOMPARE(
@@ -460,6 +531,6 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(JimakuClientTest)
+QTEST_MAIN(JimakuClientTest)
 
 #include "test_jimaku.moc"

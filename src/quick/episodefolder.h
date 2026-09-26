@@ -85,6 +85,10 @@ public:
     /** Stable identity and original filename for a playing local/torrent episode. */
     QVariantMap playbackInfo(const QString &file) const;
 
+    Q_INVOKABLE QVariantMap subtitleLinkForFile(const QString &file) const;
+    Q_INVOKABLE bool setSubtitleLinkForFile(const QString &file, const QVariantMap &link);
+    Q_INVOKABLE bool clearSubtitleLinkForFile(const QString &file);
+
     Q_INVOKABLE bool containsFile(const QString &file) const;
     /** True only for a currently issued, process-local torrent stream URL. */
     Q_INVOKABLE bool isTransientStream(const QString &file) const;
@@ -117,6 +121,7 @@ private:
         QList<int> torrentFileIndices;
         QSet<QString> watched;
         QString lastPlayed;
+        QVariantMap subtitleLink;
     };
 
     [[nodiscard]] static QString normalizedPath(const QString &value);

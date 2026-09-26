@@ -32,6 +32,7 @@ public:
     Q_INVOKABLE void refreshCatalog(const QString &query);
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE void selectEntry(int index, int episode = -1);
+    Q_INVOKABLE void openLinkedEntry(const QVariantMap &link, int episode, bool all = false);
     Q_INVOKABLE void selectEntryAllFiles(int index, int episode);
     Q_INVOKABLE void attachResult(int index);
     Q_INVOKABLE void clearSearch();
@@ -46,7 +47,7 @@ private:
     void loadCategory(int index);
     void filterTitles();
     static QVariantList parseFiles(const QByteArray &data, const QString &prefix, int episode);
-    void selectFiles(int index, int episode, bool all);
+    void selectFiles(int index, int episode, bool all, bool persist = true);
     void checkAttached();
     void error(const QString &message);
     Context *m_context;

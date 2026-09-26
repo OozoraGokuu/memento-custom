@@ -10,7 +10,7 @@ endif()
 
 project(
     Memento
-    VERSION 2.3.0
+    VERSION 2.3.1
     DESCRIPTION "Memento Study Edition, an mpv-based Japanese study player"
 	HOMEPAGE_URL "https://github.com/OozoraGokuu/memento-custom"
     LANGUAGES C CXX

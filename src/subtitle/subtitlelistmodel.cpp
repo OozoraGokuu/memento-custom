@@ -21,6 +21,7 @@
 #include "subtitle/subtitlelistmodel.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include <QItemSelection>
@@ -199,7 +200,7 @@ qsizetype SubtitleListModel::addSubtitle(
 {
     constexpr double TIME_DELTA = 0.0001;
 
-    if (m_blockAdds)
+    if (m_blockAdds || !std::isfinite(start) || !std::isfinite(end) || end <= start)
     {
         return -1;
     }
@@ -510,6 +511,9 @@ void SubtitleListModel::clear()
 
 void SubtitleListModel::setItems(std::vector<SubtitleEntry> &&items)
 {
+    std::erase_if(items, [](const SubtitleEntry &entry) {
+        return !std::isfinite(entry.start) || !std::isfinite(entry.end) || entry.end <= entry.start;
+    });
     const bool hasNativeItems = !items.empty();
     m_selectionModel->clear();
     resetActiveSubtitle();
@@ -541,4 +545,24 @@ void SubtitleListModel::setItems(std::vector<SubtitleEntry> &&items)
 const std::vector<SubtitleEntry> &SubtitleListModel::items() const noexcept
 {
     return m_items;
+}
+
+double SubtitleListModel::adjacentSubtitleStart(double position, int direction, double delay) const
+{
+    if (!std::isfinite(position) || !std::isfinite(delay) || direction == 0 ||
+        m_items.empty()) return -1;
+    const double local = position - delay;
+    if (!std::isfinite(local)) return -1;
+    // A tiny tolerance avoids repeatedly landing on the same cue after seeking.
+    const double boundary = local + (direction > 0 ? 0.01 : -0.4);
+    auto it = std::upper_bound(m_items.begin(), m_items.end(), boundary,
+        [](double time, const SubtitleEntry &entry) { return time < entry.start; });
+    if (direction < 0)
+    {
+        if (it == m_items.begin()) return -1;
+        --it;
+    }
+    else if (it == m_items.end()) return -1;
+    const double target = it->start + delay;
+    return std::isfinite(target) ? std::max(0.0, target) : -1;
 }

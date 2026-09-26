@@ -174,7 +174,7 @@ QVariantList KitsunekkoClient::parseFiles(const QByteArray &data, const QString 
 
 void KitsunekkoClient::selectEntry(int index, int episode) { selectFiles(index, episode, false); }
 void KitsunekkoClient::selectEntryAllFiles(int index, int episode) { selectFiles(index, episode, true); }
-void KitsunekkoClient::selectFiles(int index, int episode, bool all)
+void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persist)
 {
     if (index < 0 || index >= m_entries.size()) return;
     cancel();
@@ -182,6 +182,17 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all)
     const auto entry = m_entries[index].toMap();
     m_entryName = entry.value("name").toString(); m_episode = episode;
     m_mediaPath = m_context && m_context->player() ? m_context->player()->state()->path() : QString();
+    if (!validSha(entry.value("sha").toString())) {
+        error(tr("Invalid saved Kitsunekko title. Use Change link to select it again.")); return;
+    }
+    if (persist && m_context && m_context->episodeLibrary()) {
+        auto *library = m_context->episodeLibrary();
+        if (library->containsFile(m_mediaPath) &&
+            !library->setSubtitleLinkForFile(m_mediaPath,
+                {{"provider", "kitsunekko"}, {"name", m_entryName},
+                 {"sha", entry.value("sha")}, {"prefix", entry.value("prefix")}}))
+            emit failed(tr("Could not save the subtitle link. Check library storage permissions."));
+    }
     m_busy = true; m_status = tr("Loading available Japanese subtitles…"); emit changed();
     get(QUrl(api + "git/trees/" + entry.value("sha").toString() + "?recursive=1"),
         [this, entry, all, episode](const QByteArray &data) {
@@ -195,6 +206,19 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all)
             tr("%1 Japanese subtitle files. Only the file you select will be downloaded.").arg(m_files.size());
         emit changed();
     });
+}
+
+void KitsunekkoClient::openLinkedEntry(const QVariantMap &link, int episode, bool all)
+{
+    if (m_busy) return;
+    if (link.value("provider").toString() != "kitsunekko" ||
+        !validSha(link.value("sha").toString()) ||
+        !link.value("prefix").toString().startsWith("subtitles/") ||
+        link.value("prefix").toString().contains("..")) {
+        error(tr("Invalid saved Kitsunekko link. Use Change link to select the title again.")); return;
+    }
+    m_entries = {link};
+    selectFiles(0, episode, all, false);
 }
 
 void KitsunekkoClient::attachResult(int index)

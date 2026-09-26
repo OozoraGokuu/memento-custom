@@ -54,7 +54,7 @@ target_compile_options(memento_jimaku_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_include_directories(memento_jimaku_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
 target_link_libraries(
     memento_jimaku_tests
-    PRIVATE jimaku
+    PRIVATE jimaku context
     PRIVATE libzip::libzip
     PRIVATE Qt6::Test
 )
@@ -106,7 +106,7 @@ add_executable(memento_kitsunekko_tests test_kitsunekko.cpp)
 target_compile_features(memento_kitsunekko_tests PRIVATE cxx_std_20)
 target_compile_options(memento_kitsunekko_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_include_directories(memento_kitsunekko_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
-target_link_libraries(memento_kitsunekko_tests PRIVATE jimaku Qt6::Test)
+target_link_libraries(memento_kitsunekko_tests PRIVATE jimaku context Qt6::Test)
 add_test(NAME kitsunekko-online-mirror COMMAND memento_kitsunekko_tests)
 
 add_executable(memento_torrentsearch_network_tests test_torrentsearchnetworkreply.cpp)
@@ -138,7 +138,7 @@ add_executable(memento_anki_tests test_anki.cpp)
 target_compile_features(memento_anki_tests PRIVATE cxx_std_20)
 target_compile_options(memento_anki_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_include_directories(memento_anki_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
-target_link_libraries(memento_anki_tests PRIVATE context Qt6::Network Qt6::Test)
+target_link_libraries(memento_anki_tests PRIVATE context managers Qt6::Network Qt6::Test)
 add_test(NAME anki-http-and-note COMMAND memento_anki_tests)
 if(APPLE)
     # This integration test creates a real player. The macOS renderer needs
@@ -146,4 +146,11 @@ if(APPLE)
     set_tests_properties(anki-http-and-note PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
 else()
     set_tests_properties(anki-http-and-note PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
+# Provider persistence tests construct the same player/context as the app.
+if(APPLE)
+    set_tests_properties(jimaku-matching kitsunekko-online-mirror PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+else()
+    set_tests_properties(jimaku-matching kitsunekko-online-mirror PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

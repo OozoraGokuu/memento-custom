@@ -211,6 +211,12 @@ public:
      */
     Q_INVOKABLE void selectPosition(double position);
 
+    /** Playback-time target, applying delay once; -1 means no adjacent cue.
+     * Previous restarts the latest cue after 0.4s, otherwise skips back.
+     */
+    Q_INVOKABLE double adjacentSubtitleStart(
+        double position, int direction, double delay = 0) const;
+
     /**
      * @brief Get a list of rows that contain a search string.
      *

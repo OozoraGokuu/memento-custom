@@ -39,6 +39,13 @@ Page {
                 text: qsTr("Memento identifies the current show and episode, downloads the best Japanese subtitle from Jimaku, and attaches it to the player immediately.")
             }
 
+            Label {
+                Layout.preferredWidth: root.preferredWidth
+                Layout.alignment: Qt.AlignHCenter
+                wrapMode: Text.Wrap
+                text: qsTr("Selecting a subtitle title remembers it for the playing Media Library entry. Use Browse, Change link, or Unlink in subtitle search. Previous/Next use the complete parsed primary subtitle timeline and its delay when available, falling back to mpv for unparsed tracks. Previous restarts a cue after 0.4 seconds; a quick double press seeks three seconds.")
+            }
+
             SettingsBox {
                 Layout.preferredWidth: root.preferredWidth
                 Layout.alignment: Qt.AlignHCenter

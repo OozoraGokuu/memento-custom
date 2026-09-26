@@ -1,5 +1,10 @@
 name: macOS packages
 on:
+  workflow_call:
+    inputs:
+      architecture:
+        type: string
+        default: all
   workflow_dispatch:
     inputs:
       architecture:
@@ -77,7 +82,7 @@ jobs:
           python3 .github/scripts/audit-distribution.py stage
           mkdir -p artifacts
           ditto -c -k --keepParent stage/Memento.app artifacts/Memento_macOS_${{ matrix.arch }}.zip
-          bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.0 io.github.OozoraGokuu.MementoCustom
+          bash .github/scripts/verify-macos-package.sh artifacts/Memento_macOS_${{ matrix.arch }}.zip '${{ matrix.arch }}' 15.0 2.3.1 io.github.OozoraGokuu.MementoCustom
           (cd artifacts && shasum -a 256 *.zip > SHA256SUMS-macOS-${{ matrix.arch }})
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

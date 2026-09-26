@@ -407,7 +407,7 @@ void JimakuClient::selectEntryAllFiles(int resultIndex, int episode)
 void JimakuClient::selectEntryFiles(
     int resultIndex,
     int episode,
-    bool withEpisode)
+    bool withEpisode, bool persist)
 {
     if (m_busy)
     {
@@ -438,6 +438,14 @@ void JimakuClient::selectEntryFiles(
     {
         m_entryName = entry.value(QStringLiteral("english_name")).toString();
     }
+    if (persist && m_context && m_context->episodeLibrary())
+    {
+        auto *library = m_context->episodeLibrary();
+        if (library->containsFile(m_fileListMedia.path) &&
+            !library->setSubtitleLinkForFile(m_fileListMedia.path,
+                {{"provider", "jimaku"}, {"name", m_entryName}, {"entryId", entryId}}))
+            emit failed(tr("Could not save the subtitle link. Check library storage permissions."));
+    }
     setBrowseFiles({});
     emit selectionChanged();
     setBusy(true);
@@ -450,6 +458,20 @@ void JimakuClient::selectEntryFiles(
         entryId,
         withEpisode && m_selectedEpisode >= 0
     );
+}
+
+void JimakuClient::openLinkedEntry(const QVariantMap &link, int episode, bool all)
+{
+    if (m_busy) return;
+    bool ok = false;
+    const qint64 id = link.value("entryId").toLongLong(&ok);
+    if (link.value("provider").toString() != "jimaku" || !ok || id <= 0)
+    {
+        finishError(tr("Invalid saved Jimaku link. Use Change link to select the title again."));
+        return;
+    }
+    setSearchEntries({QJsonObject{{"id", id}, {"name", link.value("name").toString()}}});
+    selectEntryFiles(0, episode, !all, false);
 }
 
 void JimakuClient::attachResult(int resultIndex)

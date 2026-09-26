@@ -33,7 +33,15 @@ Rectangle {
         root.subtitleSeekOrigin = root.player.state.timePosition;
         root.lastSubtitleSeekDirection = direction;
         subtitleSeekRepeatTimer.restart();
-        root.player.controller.subtitleSeek(direction, true);
+        const model = SubtitleLists.primary;
+        if (model && model.fullTimelineReady) {
+            const target = model.adjacentSubtitleStart(
+                root.subtitleSeekOrigin, direction, root.player.state.subtitle.delay);
+            if (Number.isFinite(target) && target >= 0)
+                root.player.controller.seek(target);
+        } else {
+            root.player.controller.subtitleSeek(direction, true);
+        }
     }
 
     Timer {

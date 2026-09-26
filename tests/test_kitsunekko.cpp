@@ -1,3 +1,11 @@
+#include <QFile>
+#include <QDir>
+#include "state/context.h"
+#include <QGuiApplication>
+#include <QTemporaryDir>
+#include <QStandardPaths>
+#include <QUuid>
+#include <clocale>
 #include <QTest>
 #include <QSignalSpy>
 #include <QJsonArray>
@@ -12,7 +20,53 @@ class KitsunekkoClientTest : public QObject
 {
     Q_OBJECT
 private slots:
-    void initTestCase() { QStandardPaths::setTestModeEnabled(true); }
+    void initTestCase() {
+        std::setlocale(LC_NUMERIC, "C");
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName("subtitle-provider-test-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getDataDir()));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getConfigDir()));
+        Dictionary::createDatabaseInstance();
+    }
+    void explicitSelectionPersistsForPlayingLibrary() {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        QFile file(folder.filePath("Show - 23.mkv"));
+        QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test"); file.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        player.state()->setPath(file.fileName());
+        KitsunekkoClient client(&context);
+        client.m_entries = {QVariantMap{{"name", "Show"}, {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Show/"}}};
+        client.selectEntry(0, 23);
+        const auto link = context.episodeLibrary()->subtitleLinkForFile(file.fileName());
+        QCOMPARE(link.value("name").toString(), QString("Show"));
+        QCOMPARE(link.value("provider").toString(), QString("kitsunekko")); QCOMPARE(link.value("sha").toString(), QString(40, 'a')); QCOMPARE(link.value("prefix").toString(), QString("subtitles/anime_tv/Show/"));
+        client.cancel();
+        player.state()->setPath("/outside.mkv");
+        client.selectEntry(0, 23); client.cancel();
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(file.fileName()), link);
+        context.setPlayer(nullptr);
+    }
+
+
+    void linkedTitleBypassesCatalog()
+    {
+        KitsunekkoClient client(nullptr);
+        QSignalSpy failed(&client, &KitsunekkoClient::failed);
+        client.openLinkedEntry({{"provider", "kitsunekko"}, {"name", "Show"},
+            {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Show/"}}, 23);
+        QVERIFY(client.m_catalog.isEmpty());
+        QVERIFY(client.m_reply);
+        QVERIFY(client.m_reply->url().path().endsWith("/git/trees/" + QString(40, 'a')));
+        QCOMPARE(client.selectedEpisode(), 23);
+        QCOMPARE(client.selectedEntryName(), QString("Show"));
+        client.cancel();
+        client.openLinkedEntry({{"provider", "kitsunekko"}, {"sha", "bad"}}, 23);
+        QCOMPARE(failed.size(), 1);
+        QVERIFY(!client.busy());
+    }
     void fileFiltering()
     {
         QJsonArray files;
@@ -77,5 +131,5 @@ private slots:
         reply->deleteLater();
     }
 };
-QTEST_GUILESS_MAIN(KitsunekkoClientTest)
+QTEST_MAIN(KitsunekkoClientTest)
 #include "test_kitsunekko.moc"

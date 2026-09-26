@@ -5,6 +5,7 @@
 #include <QTest>
 
 #include <utility>
+#include <limits>
 
 #include "subtitle/subtitlelistmodel.h"
 #include "subtitle/subtitlemedia.h"
@@ -15,6 +16,49 @@ class SubtitleTests : public QObject
     Q_OBJECT
 
 private slots:
+    void adjacentNavigation()
+    {
+        SubtitleListModel model(nullptr);
+        model.setItems({{"one", 1, 2}, {"two", 4, 5}, {"three", 8, 10}, {"four", 12, 13}});
+        QVERIFY(model.fullTimelineReady());
+        QCOMPARE(model.adjacentSubtitleStart(0, 1), 1.0);
+        QCOMPARE(model.adjacentSubtitleStart(1.1, 1), 4.0);
+        QCOMPARE(model.adjacentSubtitleStart(4.1, 1), 8.0);
+        QCOMPARE(model.adjacentSubtitleStart(8.8, -1), 8.0);
+        QCOMPARE(model.adjacentSubtitleStart(8.05, -1), 4.0);
+        QCOMPARE(model.adjacentSubtitleStart(6, -1), 4.0);
+        QCOMPARE(model.adjacentSubtitleStart(6, 1), 8.0);
+        QCOMPARE(model.adjacentSubtitleStart(0, -1), -1.0);
+        QCOMPARE(model.adjacentSubtitleStart(1, -1), -1.0);
+        QCOMPARE(model.adjacentSubtitleStart(20, 1), -1.0);
+        QCOMPARE(model.adjacentSubtitleStart(20, -1), 12.0);
+        QCOMPARE(model.adjacentSubtitleStart(10.8, -1, 2), 10.0);
+        QCOMPARE(model.adjacentSubtitleStart(6.1, 1, 2), 10.0);
+        QCOMPARE(model.adjacentSubtitleStart(6.8, -1, -2), 6.0);
+        QCOMPARE(model.adjacentSubtitleStart(0, -1, -2), 0.0);
+        QCOMPARE(model.adjacentSubtitleStart(0, 0), -1.0);
+        QCOMPARE(model.adjacentSubtitleStart(std::numeric_limits<double>::quiet_NaN(), 1), -1.0);
+        QCOMPARE(model.adjacentSubtitleStart(0, 1, std::numeric_limits<double>::infinity()), -1.0);
+        model.clear();
+        QVERIFY(!model.fullTimelineReady());
+        QCOMPARE(model.adjacentSubtitleStart(0, 1), -1.0);
+        model.addSubtitle("observed", 1, 2);
+        QVERIFY(!model.fullTimelineReady());
+    }
+
+    void adjacentOverlapsDuplicatesAndInvalidTimes()
+    {
+        SubtitleListModel model(nullptr);
+        model.setItems({{"later", 8, 9}, {"long", 1, 20}, {"same", 4, 7},
+            {"short", 4, 5}, {"invalid", std::numeric_limits<double>::quiet_NaN(), 9},
+            {"invalid end", 10, std::numeric_limits<double>::infinity()}});
+        QCOMPARE(model.rowCount(), 4);
+        QCOMPARE(model.adjacentSubtitleStart(4, 1), 8.0);
+        QCOMPARE(model.adjacentSubtitleStart(4.05, -1), 1.0);
+        QCOMPARE(model.adjacentSubtitleStart(4.8, -1), 4.0);
+        QCOMPARE(model.adjacentSubtitleStart(8.8, -1), 8.0);
+    }
+
     void selectsOverlapsAndHonorsHalfOpenBoundaries()
     {
         SubtitleListModel model(nullptr);
