@@ -1,0 +1,41 @@
+name: Windows XP prototype (cross-build)
+on:
+  workflow_dispatch:
+  push:
+    branches: [windows-xp-experiment]
+    paths: ['legacy/xp/**', '.github/workflows/windows-xp-prototype.yml']
+permissions:
+  contents: read
+jobs:
+  cross-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install XP-compatible cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y g++-mingw-w64-i686-win32 p7zip-full cmake
+          i686-w64-mingw32-g++-win32 --version
+      - name: Run portable prototype tests
+        run: |
+          cmake -S legacy/xp -B build-native -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-native --parallel 2
+          ctest --test-dir build-native --output-on-failure
+      - name: Fetch verified VideoLAN runtime and SDK
+        run: |
+          curl --fail --location --retry 3 https://download.videolan.org/pub/videolan/vlc/3.0.21/win32/vlc-3.0.21-win32.7z -o vlc.7z
+          echo '77b2a79c4baf0dcc7c453f74f29fbdb55d42c790d277b5f9e0dbed0f3abc0131  vlc.7z' | sha256sum -c -
+          7z x vlc.7z -ovlc > /dev/null
+      - name: Cross-compile and audit XP imports
+        run: |
+          cmake -S legacy/xp -B build-xp -DCMAKE_TOOLCHAIN_FILE=mingw32.cmake -DCMAKE_BUILD_TYPE=Release -DVLC_SDK="$PWD/vlc/vlc-3.0.21/sdk"
+          cmake --build build-xp --parallel 2
+          python3 legacy/xp/package.py --vlc vlc/vlc-3.0.21 --build build-xp --output dist/Memento-XP-Prototype
+          sha256sum dist/Memento-XP-Prototype/*.exe > dist/Memento-XP-Prototype/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Memento-XP-Prototype-x86
+          path: dist/Memento-XP-Prototype
+          retention-days: 30
+      - name: State validation boundary
+        run: echo 'Cross-build and prototype core tests only. Actual XP guest checks and the 12 original Qt test suites are separate; this job does not assert those passed.'

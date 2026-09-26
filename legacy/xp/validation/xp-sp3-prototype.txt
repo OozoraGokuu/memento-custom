@@ -1,0 +1,18 @@
+Memento XP PROTOTYPE checks (not the modern app test suite)
+PASS Japanese/Arabic UTF-8 conversion
+PASS complete Unicode clipboard round trip
+PASS audio ordinal survives settings reload
+PASS libVLC runtime loads on this OS
+PASS fixture decoded and playback clock advanced
+PASS second audio track selectable by ordinal
+Playback state=3 time=494ms
+RESULT 15/15 passed
+Original 12 Qt application suites: NOT RUN
+
+Tested binary SHA-256: ee1b0d5e370b0e35c964b2c3a9c1d01c8ffcb0aa89edc6f48c0c07e63ce29f64
+Guest: Windows XP Professional SP3 x86 (5.1.2600)
+Compiler: MinGW GCC 10.3, Win32 threading, static C++ runtime
+Playback engine: VideoLAN VLC 3.0.21 win32
+Date: 2026-09-27 Australia/Melbourne
+
+These results apply to this binary, not future builds. The decoding test uses dummy output devices; it does not verify physical audio/video output.
