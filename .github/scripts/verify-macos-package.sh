@@ -75,11 +75,16 @@ PY
 
 "$python_executable" "$repo_root/.github/scripts/verify-media-export.py" "$executable"
 
-test "$(/usr/libexec/PlistBuddy \
-    -c 'Print :LSMinimumSystemVersion' "$plist")" = "$minimum_macos"
-test "$(/usr/libexec/PlistBuddy \
-    -c 'Print :CFBundleShortVersionString' "$plist")" = "$expected_version"
-test "$(/usr/libexec/PlistBuddy \
-    -c 'Print :CFBundleIdentifier' "$plist")" = "$expected_bundle_id"
+check_plist_value() {
+    local key=$1 expected=$2 actual
+    actual=$(/usr/libexec/PlistBuddy -c "Print :$key" "$plist")
+    if [[ "$actual" != "$expected" ]]; then
+        echo "$key mismatch: expected $expected, got $actual" >&2
+        exit 1
+    fi
+}
+check_plist_value LSMinimumSystemVersion "$minimum_macos"
+check_plist_value CFBundleShortVersionString "$expected_version"
+check_plist_value CFBundleIdentifier "$expected_bundle_id"
 
 echo "Verified extracted package: $archive_path"
