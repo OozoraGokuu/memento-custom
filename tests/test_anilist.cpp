@@ -62,6 +62,8 @@ private slots:
         QCOMPARE(AniListClient::episodeFromName("Show [EP002].mkv"), 2);
         QCOMPARE(AniListClient::episodeFromName("Show [1080p] [2026].mkv"), 0);
         QCOMPARE(AniListClient::episodeFromName("Unknown movie.mkv"), 0);
+        QCOMPARE(AniListClient::episodeFromName("86 02 Next.mkv"), 0);
+        QCOMPARE(AniListClient::episodeFromName("02.mkv"), 2);
         AniListClient c(nullptr); prepare(c);
         c.m_results = {QVariantMap{{"id", 101}, {"title", "Show"}}};
         c.linkTitle("show", 0, -1);
@@ -77,6 +79,8 @@ private slots:
         QCOMPARE(AniListClient::episodeFromSiblings(slam.first(), {slam.first()}), 0);
         const QStringList numberedTitle{"86 01 Beginning 1080p 10 BIT.mkv", "86 02 Next 1080p 10 BIT.mkv"};
         QCOMPARE(AniListClient::episodeFromSiblings(numberedTitle.last(), numberedTitle), 2);
+        const QStringList leading{"01 Beginning.mkv", "02 Next.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(leading.last(), leading), 2);
         const QStringList metadata{"Show 2025 1080p 8 bit.mkv", "Show 2026 2160p 10 bit.mkv"};
         QCOMPARE(AniListClient::episodeFromSiblings(metadata.last(), metadata), 0);
         const QStringList codecs{"Show x264 24 fps.mkv", "Show x265 25 fps.mkv"};
@@ -101,6 +105,10 @@ private slots:
         const QString key = c.currentKey();
         c.m_config.insert("mappings", QJsonObject{{key, QJsonObject{{"id", 101}, {"episodes", 101}}}});
         QCOMPARE(c.currentEpisode(), 49);
+        c.m_current.insert("filename", "86 02 Next.mkv");
+        c.m_current.insert("inferredEpisode", 2);
+        QCOMPARE(c.currentEpisode(), 2);
+        c.m_current.insert("inferredEpisode", 49);
         c.m_current.insert("filename", "Slam Dunk S01E03.mkv");
         QCOMPARE(c.currentEpisode(), 3); // Explicit markers win over inference.
         c.m_current.insert("filename", "Slam Dunk 49 Last Fight.mkv");

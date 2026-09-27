@@ -314,7 +314,7 @@ int AniListClient::episodeFromName(const QString &name)
         R"(\b(?:EP?|Episode)[ ._-]?(\d{1,4})(?:\b|v\d))",
         R"([\[(](\d{1,3})(?:v\d)?[\])])",
         R"((?:^|\s)-\s*(\d{1,4})(?:v\d)?(?:\s|$|\[))",
-        R"(^(\d{1,3})(?:\s|$))"
+        R"(^(\d{1,3})$)"
     };
     for (const auto &pattern : patterns) {
         const auto match = QRegularExpression(pattern, QRegularExpression::CaseInsensitiveOption).match(stem);
@@ -338,7 +338,7 @@ int AniListClient::episodeFromSiblings(const QString &name, const QStringList &s
             const QString prefix = stem.left(match.capturedStart());
             const QString suffix = stem.mid(match.capturedEnd());
             const int n = match.captured().toInt();
-            if (n <= 0 || prefix.trimmed().isEmpty() ||
+            if (n <= 0 ||
                 prefix.count('[') != prefix.count(']') ||
                 prefix.count('(') != prefix.count(')') || metadata.match(suffix).hasMatch()) continue;
             // Include the relative directory so mixed seasons cannot validate each other.
