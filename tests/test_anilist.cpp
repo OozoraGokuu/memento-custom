@@ -95,7 +95,7 @@ private slots:
     void libraryInferenceAndSeasonBounds() {
         QTemporaryDir folder;
         QVERIFY(folder.isValid());
-        for (const QString &name : {"Slam Dunk 47 Challenge.mkv", "Slam Dunk 48 Rival.mkv", "Slam Dunk 49 Last Fight.mkv"}) {
+        for (const QString name : {"Slam Dunk 47 Challenge.mkv", "Slam Dunk 48 Rival.mkv", "Slam Dunk 49 Last Fight.mkv"}) {
             QFile f(folder.filePath(name)); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("test");
         }
         EpisodeFolder library;
