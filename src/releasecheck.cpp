@@ -209,8 +209,15 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
             } else if (phase == 2 && state->pause() && state->timePosition() > 1.2 &&
                        state->timePosition() < 1.8 &&
                        !context.subtitleLists()->primary()->activeText().isEmpty()) {
-                if (QGuiApplication::clipboard()->text() !=
-                    context.subtitleLists()->primary()->activeText()) return;
+                // mpv's position and subtitle properties arrive separately after
+                // a seek. Wait for the same cue source the exporter will read.
+                const auto *primary = context.subtitleLists()->primary();
+                const auto *cue = state->subtitle();
+                if (!primary->fullTimelineReady() &&
+                    (cue->text().trimmed().isEmpty() ||
+                     cue->startTime() > state->timePosition() ||
+                     cue->endTime() <= state->timePosition())) return;
+                if (QGuiApplication::clipboard()->text() != primary->activeText()) return;
                 if (!*observedLoading || player->loading() || player->buffering()) { fail("Episode loading state did not start and clear around playback."); return; }
                 phase = 3;
                 context.migakuClient()->exportCurrentSubtitle();
