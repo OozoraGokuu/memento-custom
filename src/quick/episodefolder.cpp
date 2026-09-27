@@ -2111,7 +2111,7 @@ QVariantMap EpisodeFolder::playbackInfo(const QString &file) const
     if (entry < 0 || episode < 0) return {};
     const Entry &item = m_entries.at(entry);
     return {{"key", item.id}, {"title", item.title},
-        {"filename", item.relativePaths.at(episode)}};
+        {"filename", item.relativePaths.at(episode)}, {"siblings", item.relativePaths}};
 }
 
 QVariantMap EpisodeFolder::subtitleLinkForFile(const QString &file) const

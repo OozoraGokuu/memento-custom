@@ -91,6 +91,10 @@ ColumnLayout {
             onValueModified: AniListClient.setCurrentEpisode(value)
         }
         Button {
+            text: qsTr("Detect automatically")
+            onClicked: AniListClient.setCurrentEpisode(0)
+        }
+        Button {
             text: qsTr("Sync now")
             enabled: AniListClient.connected && AniListClient.enabled && !!root.link.id && AniListClient.currentEpisode > 0 && !AniListClient.busy
             onClicked: AniListClient.syncNow()
@@ -99,7 +103,7 @@ ColumnLayout {
     Label {
         visible: root.targetKey === AniListClient.currentKey && AniListClient.currentEpisode === 0
         Layout.fillWidth: true
-        text: qsTr("Episode number is unknown. Set it above before syncing this video.")
+        text: qsTr("Episode number is unknown, ambiguous, or outside the linked season. Confirm it above before syncing. Corrections are saved for this file.")
         wrapMode: Text.Wrap
     }
 }

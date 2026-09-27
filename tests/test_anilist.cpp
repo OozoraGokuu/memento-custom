@@ -68,6 +68,81 @@ private slots:
         QCOMPARE(c.currentEpisode(), 1);
         c.setCurrentEpisode(4); QCOMPARE(c.currentEpisode(), 4);
     }
+    void contextualEpisodeDetection() {
+        const QStringList slam{
+            "Slam Dunk 47 Challenge from a Rival.mkv",
+            "Slam Dunk 48 The Guy Who Pledged to Defeat Kainan.mkv",
+            "Slam Dunk 49 Takezono, Last Fight.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(slam.last(), slam), 49);
+        QCOMPARE(AniListClient::episodeFromSiblings(slam.first(), {slam.first()}), 0);
+        const QStringList numberedTitle{"86 01 Beginning 1080p 10 BIT.mkv", "86 02 Next 1080p 10 BIT.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(numberedTitle.last(), numberedTitle), 2);
+        const QStringList metadata{"Show 2025 1080p 8 bit.mkv", "Show 2026 2160p 10 bit.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(metadata.last(), metadata), 0);
+        const QStringList codecs{"Show x264 24 fps.mkv", "Show x265 25 fps.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(codecs.last(), codecs), 0);
+        const QStringList titleNumber{"Show 2 First Movie.mkv", "Show 2 Second Movie.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(titleNumber.last(), titleNumber), 0);
+        const QStringList mixedSeasons{"Season 1/Show 01.mkv", "Season 2/Show 02.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(mixedSeasons.last(), mixedSeasons), 0);
+        const QStringList ambiguous{"Show 1 Part 1.mkv", "Show 2 Part 1.mkv", "Show 1 Part 2.mkv"};
+        QCOMPARE(AniListClient::episodeFromSiblings(ambiguous.first(), ambiguous), 0);
+    }
+    void libraryInferenceAndSeasonBounds() {
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        for (const QString &name : {"Slam Dunk 47 Challenge.mkv", "Slam Dunk 48 Rival.mkv", "Slam Dunk 49 Last Fight.mkv"}) {
+            QFile f(folder.filePath(name)); QVERIFY(f.open(QIODevice::WriteOnly)); f.write("test");
+        }
+        EpisodeFolder library;
+        QVERIFY(library.addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        AniListClient c(&library); prepare(c);
+        c.refreshCurrent(folder.filePath("Slam Dunk 49 Last Fight.mkv"));
+        const QString key = c.currentKey();
+        c.m_config.insert("mappings", QJsonObject{{key, QJsonObject{{"id", 101}, {"episodes", 101}}}});
+        QCOMPARE(c.currentEpisode(), 49);
+        c.m_current.insert("filename", "Slam Dunk S01E03.mkv");
+        QCOMPARE(c.currentEpisode(), 3); // Explicit markers win over inference.
+        c.m_current.insert("filename", "Slam Dunk 49 Last Fight.mkv");
+        c.m_config.insert("mappings", QJsonObject{{key, QJsonObject{{"id", 101}, {"episodes", 12}}}});
+        QCOMPARE(c.currentEpisode(), 0);
+        c.m_config.insert("mappings", QJsonObject{{key, QJsonObject{{"id", 101}, {"episodes", 12}, {"offset", -48}}}});
+        QCOMPARE(c.currentEpisode(), 1);
+    }
+    void correctionSurvivesRestartAndStreamUrlChanges() {
+        AniListClient c(nullptr); prepare(c);
+        c.m_configPath = QDir(DirectoryUtils::getConfigDir()).filePath("anilist.json");
+        c.m_config.remove("access_token"); // Never authenticate from this persisted fixture.
+        c.m_file = "http://127.0.0.1:1234/temporary-stream";
+        c.setCurrentEpisode(7);
+        {
+            AniListClient reopened(nullptr);
+            reopened.m_file = "http://127.0.0.1:5678/new-stream";
+            reopened.m_current = c.m_current;
+            QCOMPARE(reopened.currentEpisode(), 7);
+            reopened.m_current.insert("filename", "Show - 03.mkv");
+            QCOMPARE(reopened.currentEpisode(), 3);
+            reopened.m_current = c.m_current;
+            reopened.m_config.insert("mappings", QJsonObject{{"show", QJsonObject{{"id", 999}}}});
+            QCOMPARE(reopened.currentEpisode(), 2); // Relinking cannot reuse a stale correction.
+            reopened.m_config = c.m_config;
+            reopened.setCurrentEpisode(0);
+            QCOMPARE(reopened.currentEpisode(), 2);
+        }
+        QVERIFY(QFile::remove(c.m_configPath));
+    }
+    void correctionInvalidatesPendingRead() {
+        AniListClient c(nullptr); prepare(c);
+        AniListClient::Callback read;
+        int writes = 0;
+        c.m_transport = [&](QString query, QJsonObject, QString, AniListClient::Callback done) {
+            if (query.startsWith("mutation")) ++writes; else read = done;
+        };
+        c.syncNow(); QVERIFY(bool(read));
+        c.setCurrentEpisode(3);
+        read({{"Media", media(0)}}, {}, false, 0);
+        QCOMPARE(writes, 0); QCOMPARE(c.pendingCount(), 0);
+    }
     void thresholdAndDuplicateSuppression() {
         AniListClient c(nullptr); prepare(c);
         int reads = 0, writes = 0;

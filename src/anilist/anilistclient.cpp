@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <QCryptographicHash>
 
 namespace {
 const QString origin = QStringLiteral("http://127.0.0.1:47832");
@@ -321,17 +322,91 @@ int AniListClient::episodeFromName(const QString &name)
     }
     return 0;
 }
+int AniListClient::episodeFromSiblings(const QString &name, const QStringList &siblings)
+{
+    // Infer only a varying, consecutive numeric field with a shared title prefix.
+    // Multiple plausible fields are ambiguous; never choose one arbitrarily.
+    const auto fields = [](const QString &path) {
+        QMap<QString, int> result;
+        const QFileInfo file(path);
+        const QString stem = file.completeBaseName();
+        static const QRegularExpression number(R"((?<![\p{L}\p{N}])(\d{1,3})(?![\p{L}\p{N}]))");
+        static const QRegularExpression metadata(R"(^\s*[-_ ]?(?:bits?\b|fps\b|khz\b|hz\b|channels?\b))", QRegularExpression::CaseInsensitiveOption);
+        auto matches = number.globalMatch(stem);
+        while (matches.hasNext()) {
+            const auto match = matches.next();
+            const QString prefix = stem.left(match.capturedStart());
+            const QString suffix = stem.mid(match.capturedEnd());
+            const int n = match.captured().toInt();
+            if (n <= 0 || prefix.trimmed().isEmpty() ||
+                prefix.count('[') != prefix.count(']') ||
+                prefix.count('(') != prefix.count(')') || metadata.match(suffix).hasMatch()) continue;
+            // Include the relative directory so mixed seasons cannot validate each other.
+            result.insert(file.path() + "/" + prefix.toCaseFolded(), n);
+        }
+        return result;
+    };
+    const auto candidates = fields(name);
+    QMap<QString, QSet<int>> values;
+    for (const auto &sibling : siblings) {
+        const auto other = fields(sibling);
+        for (auto it = candidates.cbegin(); it != candidates.cend(); ++it)
+            if (other.contains(it.key())) values[it.key()].insert(other.value(it.key()));
+    }
+    int result = 0;
+    for (auto it = candidates.cbegin(); it != candidates.cend(); ++it) {
+        const auto numbers = values.value(it.key());
+        if (!numbers.contains(it.value()) || numbers.size() < 2) continue;
+        bool consecutive = false;
+        for (int n : numbers) consecutive |= numbers.contains(n + 1);
+        if (!consecutive) continue;
+        if (result != 0) return 0;
+        result = it.value();
+    }
+    return result;
+}
+QString AniListClient::episodeOverrideKey() const
+{
+    if (currentKey().isEmpty() || m_current.value("filename").toString().isEmpty()) return {};
+    const auto link = mapping(currentKey());
+    const QByteArray identity = QJsonDocument(QJsonArray{currentKey(),
+        m_current.value("filename").toString(), link.value("id").toInt(),
+        link.value("offset").toInt()}).toJson(QJsonDocument::Compact);
+    return QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex());
+}
 int AniListClient::currentEpisode() const
 {
-    if (m_episodeOverrides.contains(m_file)) return m_episodeOverrides.value(m_file);
-    const int parsed = episodeFromName(m_current.value("filename").toString());
+    const auto overrides = m_config.value("episode_overrides").toObject();
+    const int corrected = overrides.value(episodeOverrideKey()).toInt();
+    if (corrected > 0) return corrected;
+    int parsed = episodeFromName(m_current.value("filename").toString());
+    if (parsed <= 0) parsed = m_current.value("inferredEpisode").toInt();
     if (parsed <= 0) return 0;
-    return std::max(0, parsed + mapping(currentKey()).value("offset").toInt());
+    const auto link = mapping(currentKey());
+    const int episode = parsed + link.value("offset").toInt();
+    const int total = link.value("episodes").toInt();
+    return episode > 0 && (total <= 0 || episode <= total) ? episode : 0;
 }
 void AniListClient::setCurrentEpisode(int episode)
 {
-    if (m_file.isEmpty()) return;
-    m_episodeOverrides.insert(m_file, std::clamp(episode, 0, 9999)); emit changed();
+    const QString key = episodeOverrideKey();
+    if (key.isEmpty()) return;
+    const int oldEpisode = currentEpisode();
+    auto overrides = m_config.value("episode_overrides").toObject();
+    if (episode <= 0) overrides.remove(key);
+    else overrides.insert(key, std::clamp(episode, 1, 9999));
+    m_config.insert("episode_overrides", overrides);
+    // A correction must invalidate an earlier queued read before it can write.
+    QJsonArray pending;
+    for (const auto &value : m_config.value("pending").toArray()) {
+        const auto item = value.toObject();
+        if (item.value("key").toString() != currentKey() ||
+            item.value("episode").toInt() != oldEpisode) pending.append(item);
+    }
+    m_config.insert("pending", pending);
+    m_rejected.clear();
+    if (save()) announce(episode > 0 ? tr("Episode correction saved for this file.") :
+        tr("Using automatic episode detection for this file."));
 }
 void AniListClient::refreshCurrent(const QString &path)
 {
@@ -343,9 +418,12 @@ void AniListClient::refreshCurrent(const QString &path)
         if (!local.isEmpty()) {
             const QFileInfo file(local);
             m_current = {{"key", "folder:" + file.absolutePath()},
-                {"title", file.dir().dirName()}, {"filename", file.fileName()}};
+                {"title", file.dir().dirName()}, {"filename", file.fileName()},
+                {"siblings", file.dir().entryList({"*.mkv", "*.mp4", "*.avi", "*.webm", "*.m4v"}, QDir::Files)}};
         }
     }
+    m_current.insert("inferredEpisode", episodeFromSiblings(
+        m_current.value("filename").toString(), m_current.value("siblings").toStringList()));
     emit changed();
 }
 void AniListClient::attachPlayer(MpvPlayer *player)
@@ -369,7 +447,8 @@ void AniListClient::observe(double position, double duration)
         duration <= 0 || position < duration * threshold() / 100.0) return;
     // Refresh membership independently of the currently selected library item.
     const auto entry = m_library ? m_library->playbackInfo(m_file) : QVariantMap();
-    if (!entry.isEmpty() && entry != m_current) { m_current = entry; emit changed(); }
+    if (!entry.isEmpty() && (entry.value("key") != m_current.value("key") ||
+        entry.value("siblings") != m_current.value("siblings"))) refreshCurrent(m_file);
     enqueueCurrent();
 }
 void AniListClient::syncNow()
@@ -384,7 +463,7 @@ void AniListClient::enqueueCurrent()
     const int id = link.value("id").toInt();
     const int episode = currentEpisode();
     if (id <= 0 || episode <= 0) {
-        const QString message = tr("Link the playing title and confirm its episode in AniList settings.");
+        const QString message = tr("AniList needs attention: link the playing title and confirm its episode in AniList settings.");
         if (m_status != message) announce(message);
         return;
     }

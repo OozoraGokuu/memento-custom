@@ -12,7 +12,7 @@ The Windows CI job compiles native x86_64 binaries with warnings treated as erro
 | AJATT mirror | Catalog/cache/download logic tests |
 | Torrent RSS search | User-configured URLs, same-origin RSS discovery and torrent links, request parameter preservation, RSS parsing, sorting and DNS fallback transport tests |
 | Torrent streaming | Engine selection, HTTP byte-range streaming of synthetic data, invalid ranges, normal cleanup and link/junction safety tests |
-| AniList | Authorization callback, progress rules, queue, stale account and retry tests using a fake service |
+| AniList | Authorization callback, explicit/contextual episode detection, ambiguous and metadata-number rejection, season bounds, persistent per-file corrections, progress rules, queue, stale account and retry tests using a fake service |
 | Migaku export | Actual video/subtitle playback, separate JPG/MP3 capture, duplicate capture, MP3 decoding and non-silent PCM signal; clip guards and rollback |
 | Privacy | Source/package scans; isolated fresh-profile account defaults |
 | Windows portability | Fresh runner without MSYS2; Japanese/Arabic install, media and export paths; MeCab lookup; verified HTTPS with bundled certificates |

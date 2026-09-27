@@ -77,6 +77,8 @@ private:
     void announce(const QString &message);
     static QUrl authorizationUrl(const QString &clientId, const QString &state);
     static int episodeFromName(const QString &name);
+    static int episodeFromSiblings(const QString &name, const QStringList &siblings);
+    QString episodeOverrideKey() const;
     static QJsonObject progressUpdate(const QJsonObject &media, int requested);
     EpisodeFolder *m_library;
     QPointer<MpvPlayer> m_player;
@@ -87,7 +89,6 @@ private:
     QJsonObject m_config;
     QVariantMap m_current;
     QVariantList m_results;
-    QHash<QString, int> m_episodeOverrides;
     QHash<int, int> m_confirmed;
     QSet<QString> m_rejected;
     QString m_file;
