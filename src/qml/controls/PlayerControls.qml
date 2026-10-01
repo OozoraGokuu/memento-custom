@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 import QtQuick.Controls
 import QtQuick.Layouts
 import Ripose.Memento
@@ -9,6 +10,43 @@ Rectangle {
     required property MpvPlayer player
 
     readonly property real position: durationSlider.position
+
+    Settings {
+        id: highlightSettings
+        category: "TimestampHighlights"
+        property string saved: "{}"
+    }
+
+    readonly property var highlightMap: {
+        try { return JSON.parse(highlightSettings.saved); }
+        catch (error) { return {}; }
+    }
+    readonly property var highlights: highlightMap[root.player.state.path] || []
+
+    function highlightTimestamp() {
+        const time = root.player.state.timePosition;
+        const path = root.player.state.path;
+        if (!path || !Number.isFinite(time) || time < 0) return;
+        const map = JSON.parse(highlightSettings.saved || "{}");
+        const items = map[path] || [];
+        if (items.some(t => Math.abs(t - time) < 1)) {
+            root.player.controller.showText(qsTr("This timestamp is already highlighted"));
+            return;
+        }
+        items.push(time);
+        items.sort((a, b) => a - b);
+        map[path] = items;
+        highlightSettings.saved = JSON.stringify(map);
+        highlightSettings.sync();
+        root.player.controller.showText(qsTr("Highlighted %1").arg(Utils.toTimeString(time)));
+    }
+
+    function removeHighlight(time) {
+        const map = JSON.parse(highlightSettings.saved || "{}");
+        map[root.player.state.path] = root.highlights.filter(t => t !== time);
+        highlightSettings.saved = JSON.stringify(map);
+        highlightSettings.sync();
+    }
 
     property int lastSubtitleSeekDirection: 0
     property real subtitleSeekOrigin: 0
@@ -134,6 +172,44 @@ Rectangle {
             onClicked: root.player.controller.playlistNext()
         }
 
+        ToolButton {
+            id: highlightButton
+            text: qsTr("★ Highlight")
+            focusPolicy: Qt.NoFocus
+            enabled: !!root.player.state.path && root.player.state.duration > 0
+            onClicked: root.highlightTimestamp()
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Save the current timestamp as a highlight")
+            Accessible.name: qsTr("Highlight current timestamp")
+        }
+
+        ToolButton {
+            text: qsTr("Highlights (%1)").arg(root.highlights.length)
+            focusPolicy: Qt.NoFocus
+            enabled: root.highlights.length > 0
+            onClicked: highlightMenu.popup()
+            Menu {
+                id: highlightMenu
+                Instantiator {
+                    model: root.highlights
+                    delegate: Menu {
+                        required property var modelData
+                        title: "★ " + Utils.toTimeString(modelData)
+                        MenuItem {
+                            text: qsTr("Jump to highlight")
+                            onTriggered: root.player.controller.seek(modelData)
+                        }
+                        MenuItem {
+                            text: qsTr("Remove highlight")
+                            onTriggered: root.removeHighlight(modelData)
+                        }
+                    }
+                    onObjectAdded: (index, object) => highlightMenu.insertMenu(index, object)
+                    onObjectRemoved: (index, object) => highlightMenu.removeMenu(object)
+                }
+            }
+        }
+
         Label {
             id: positionLabel
             Layout.preferredWidth: durationLabel.width
@@ -152,6 +228,7 @@ Rectangle {
             from: 0
             to: root.player.state.duration
             chapters: root.player.state.chapters
+            highlights: root.highlights
             onMoved: root.player.controller.seek(value)
 
             Timer {

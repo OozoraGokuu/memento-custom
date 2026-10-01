@@ -5,6 +5,7 @@ Slider {
     id: root
 
     property var chapters: []
+    property var highlights: []
 
     readonly property real xPosition: {
         if (root.pressed)
@@ -68,6 +69,17 @@ Slider {
             width: root.visualPosition * parent.width
             height: parent.height
             color: MementoPalette.accent
+        }
+
+        Repeater {
+            model: root.highlights
+            Rectangle {
+                required property var modelData
+                x: Math.max(0, Math.min(parent.width - width, parent.width * modelData / Math.max(1, root.to)))
+                width: 4
+                height: parent.height
+                color: "#ffd54f"
+            }
         }
 
         Repeater {
