@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
+import QtQuick.Layouts
 import QtQuick.Window
 import Ripose.Memento
 
@@ -208,6 +209,13 @@ ApplicationWindow {
             onJimakuSearchRequested: jimakuSearchDialog.openForCurrentMedia()
             onNextSubtitleSearchRequested: jimakuSearchDialog.openNextEpisode()
             onTorrentSearchRequested: torrentSearchDialog.openForCurrentMedia()
+            onStatisticsRequested: {
+                MementoSettings.windowLibrary = true;
+                libraryTabs.currentIndex = 1;
+                libraryWindow.raise();
+                libraryWindow.requestActivate();
+            }
+            onAniListSearchRequested: aniListSearchDialog.openForCurrentMedia()
 
             Connections {
                 target: FileOpenHandler
@@ -323,7 +331,7 @@ ApplicationWindow {
     ApplicationWindow {
         id: libraryWindow
         objectName: "mediaLibraryWindow"
-        title: qsTr("Media Library — Memento")
+        title: qsTr("Library & Statistics — Memento")
         width: 1060
         height: 760
         minimumWidth: 720
@@ -331,13 +339,27 @@ ApplicationWindow {
         color: MementoPalette.window
         visible: MementoSettings.windowLibrary
         onClosing: MementoSettings.windowLibrary = false
-        LibraryPage {
-            id: libraryPage
+        Column {
             anchors.fill: parent
-            player: player
-            onTorrentSearchRequested: {
-                root.raise(); root.requestActivate();
-                torrentSearchDialog.openForCurrentMedia();
+            TabBar {
+                id: libraryTabs
+                width: parent.width
+                TabButton { text: qsTr("Library") }
+                TabButton { text: qsTr("Statistics") }
+            }
+            StackLayout {
+                width: parent.width
+                height: parent.height - libraryTabs.height
+                currentIndex: libraryTabs.currentIndex
+                LibraryPage {
+                    id: libraryPage
+                    player: player
+                    onTorrentSearchRequested: {
+                        root.raise(); root.requestActivate();
+                        torrentSearchDialog.openForCurrentMedia();
+                    }
+                }
+                StatisticsPage { id: statisticsPage }
             }
         }
     }
@@ -350,6 +372,10 @@ ApplicationWindow {
     JimakuSearchDialog {
         id: jimakuSearchDialog
         player: player
+    }
+
+    AniListSearchDialog {
+        id: aniListSearchDialog
     }
 
     SubtitleListPage {

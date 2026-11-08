@@ -43,7 +43,7 @@ Page {
                 Layout.preferredWidth: root.preferredWidth
                 Layout.alignment: Qt.AlignHCenter
                 wrapMode: Text.Wrap
-                text: qsTr("Selecting a subtitle title remembers it for the playing Media Library entry. Use Browse, Change link, or Unlink in subtitle search. Previous/Next use the complete parsed primary subtitle timeline and its delay when available, falling back to mpv for unparsed tracks. Previous restarts a cue after 0.4 seconds; a quick double press seeks three seconds.")
+                text: qsTr("Selecting a subtitle title remembers it for the playing Media Library entry and automatically loads matching subtitles for subsequent episodes when automatic attachment is enabled. Use Browse, Change link, or Unlink in subtitle search. Previous/Next use the complete parsed primary subtitle timeline and its delay when available, falling back to mpv for unparsed tracks. Previous restarts a cue after 0.4 seconds; a quick double press seeks three seconds.")
             }
 
             SettingsBox {
@@ -133,7 +133,7 @@ Page {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
                                 color: MementoPalette.placeholderText
-                                text: qsTr("Fetch from Jimaku as soon as a local or torrent episode starts.")
+                                text: qsTr("When an episode starts, use its linked Jimaku or Kitsunekko title automatically. Without a link, search Jimaku.")
                             }
                         }
 

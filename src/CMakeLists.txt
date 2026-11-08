@@ -61,6 +61,7 @@ qt_add_qml_module(
         qml/controls/CenteredFlow.qml
         qml/controls/KeybindCommand.qml
         qml/controls/LibraryPage.qml
+        qml/controls/StatisticsPage.qml
         qml/controls/ManualSearchPage.qml
         qml/controls/Player.qml
         qml/controls/PlayerControls.qml
@@ -93,6 +94,7 @@ qt_add_qml_module(
         qml/definition/TermGlossary.qml
         qml/definition/TermPitch.qml
         qml/dialogs/JimakuSearchDialog.qml
+        qml/dialogs/AniListSearchDialog.qml
         qml/dialogs/TorrentSearchDialog.qml
         qml/dialogs/UpdateDialog.qml
         qml/Main.qml

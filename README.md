@@ -31,6 +31,9 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 - Japanese dictionary lookup, MeCab inflection analysis, Yomitan-format dictionaries and kanji lookup. [Dictionary downloads](docs/DICTIONARIES.md).
 - AnkiConnect card creation with configurable fields and image/audio/video media.
 - Primary and secondary subtitle rendering, subtitle lists and navigation, timing adjustment and auto-pause.
+- Five-second relative rewind and forward buttons, matching mpv's default seek keys.
+- Immersion statistics, AniList title search and episode matching, and a media-library episode picker.
+- On X11, **Subtitle → Include Subtitles in Stream** controls whether text subtitles appear in a capture of Memento's window while they remain visible locally. Screen sharing and bitmap subtitle tracks cannot separate them.
 - Persistent media library for local folders and torrents, episode progress and watched state.
 - Japanese subtitle search through **Jimaku** (your API key) and the online **AJATT Kitsunekko mirror** (no full mirror download). No OpenSubtitles integration.
 - Torrent RSS search using a **website/feed URL you supply**, seeder/newest sorting, magnet/torrent import and direct streaming of one selected episode. No search provider or mirror is preconfigured.

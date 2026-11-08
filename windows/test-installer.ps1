@@ -58,7 +58,9 @@ function Invoke-BoundedProcess {
 
         [string]$ExpectedErrorText = '',
 
-        [int[]]$ExpectedExitCodes = @(0)
+        [int[]]$ExpectedExitCodes = @(0),
+
+        [int]$TimeoutSeconds = 0
     )
 
     $parameters = @{
@@ -73,10 +75,25 @@ function Invoke-BoundedProcess {
     Remove-Item -LiteralPath $env:MEMENTO_INSTALLER_LOG -Force `
         -ErrorAction SilentlyContinue
     $process = Start-Process @parameters
-    if (-not $process.WaitForExit($ProcessTimeoutSeconds * 1000)) {
-        $process.Kill()
-        $process.WaitForExit()
-        throw "Process timed out after $ProcessTimeoutSeconds seconds: $FilePath"
+    $effectiveTimeoutSeconds = if ($TimeoutSeconds -gt 0) {
+        $TimeoutSeconds
+    }
+    else {
+        $ProcessTimeoutSeconds
+    }
+    if (-not $process.WaitForExit($effectiveTimeoutSeconds * 1000)) {
+        $timeoutDiagnostic = if (Test-Path -LiteralPath $env:MEMENTO_INSTALLER_LOG) {
+            [IO.File]::ReadAllText($env:MEMENTO_INSTALLER_LOG)
+        }
+        else {
+            '(no installer diagnostic was written)'
+        }
+        # The installer can be waiting on a copied uninstaller. Stop the full
+        # process tree so a timed-out test cannot leave an elevated child alive.
+        & "$env:SystemRoot\System32\taskkill.exe" /PID $process.Id /T /F |
+            Out-Null
+        $process.WaitForExit(5000) | Out-Null
+        throw "Process timed out after $effectiveTimeoutSeconds seconds: $FilePath`n$timeoutDiagnostic"
     }
 
     $diagnostic = ''
@@ -512,6 +529,8 @@ try {
         Invoke-BoundedProcess `
             -FilePath $resolvedInstaller `
             -ArgumentList '/S' `
+            -TimeoutSeconds 30 `
+            -ExpectedErrorText 'Memento is running' `
             -ExpectedExitCodes 2
     }
     finally {

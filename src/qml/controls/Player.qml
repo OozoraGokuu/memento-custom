@@ -1,4 +1,6 @@
 import QtQuick
+import QtCore
+import QtQuick.Window
 import QtQuick.Controls
 import Ripose.Memento
 
@@ -31,6 +33,105 @@ MpvPlayer {
 
     property point cursorPosition: Qt.point(0, 0)
 
+    Settings {
+        id: movieSettings
+        category: "MovieMode"
+        property bool enabled: true
+    }
+    Settings {
+        id: streamSettings
+        category: "WindowShare"
+        property bool includeTextSubtitles: true
+    }
+    readonly property bool streamSubtitlesCanBeHidden:
+        !root.primarySubtitleIsBitmap && !root.secondarySubtitleIsBitmap
+    readonly property bool privateSubtitlesActive:
+        Features.isX11 && !streamSettings.includeTextSubtitles &&
+        root.streamSubtitlesCanBeHidden
+    onPrivateSubtitlesActiveChanged: root.synchronizeSubtitleRenderers()
+
+    function updatePrivateSubtitleWindowPosition() {
+        if (!root.Window.window) return;
+        const position = root.mapToGlobal(0, 0);
+        privatePrimarySubtitleWindow.x = Math.round(position.x);
+        privatePrimarySubtitleWindow.y = Math.round(position.y + subtitleText.y);
+        privateSecondarySubtitleWindow.x = Math.round(position.x);
+        privateSecondarySubtitleWindow.y = Math.round(position.y + secondarySubtitleText.y);
+    }
+    onXChanged: root.updatePrivateSubtitleWindowPosition()
+    onYChanged: root.updatePrivateSubtitleWindowPosition()
+    onWidthChanged: root.updatePrivateSubtitleWindowPosition()
+    onHeightChanged: root.updatePrivateSubtitleWindowPosition()
+    Component.onCompleted: Qt.callLater(root.updatePrivateSubtitleWindowPosition)
+
+    Connections {
+        target: root.Window.window
+        function onXChanged() { root.updatePrivateSubtitleWindowPosition(); }
+        function onYChanged() { root.updatePrivateSubtitleWindowPosition(); }
+        function onVisibilityChanged() { Qt.callLater(root.updatePrivateSubtitleWindowPosition); }
+    }
+    Connections {
+        target: subtitleText
+        function onYChanged() { root.updatePrivateSubtitleWindowPosition(); }
+    }
+    Connections {
+        target: secondarySubtitleText
+        function onYChanged() { root.updatePrivateSubtitleWindowPosition(); }
+    }
+    readonly property bool movieModeActive: movieSettings.enabled && root.state.fullscreen
+    property bool screenshotSentencePending: false
+    property string screenshotSentence: ""
+
+    function playerShortcutAllowed() {
+        let item = root.Window.window?.activeFocusItem;
+        while (item) {
+            if (item === subtitleText || item === root) return true;
+            // Preserve Copy/Cut in editable fields and subtitle list selections.
+            if (typeof item.selectAll === "function") return false;
+            item = item.parent;
+        }
+        return false;
+    }
+
+    function copyCurrentSubtitle() {
+        if (!subtitleText.text.trim()) return;
+        subtitleClipboard.setText(subtitleText.text);
+        root.controller.showText(qsTr("Subtitle copied"));
+    }
+
+    function copyScreenshotAndSentence() {
+        if (root.screenshotSentencePending) {
+            subtitleClipboard.setText(root.screenshotSentence);
+            root.screenshotSentencePending = false;
+            root.controller.showText(qsTr("Sentence copied"));
+            return;
+        }
+        const result = root.controller.copySubtitleScreenshot();
+        if (!result.ok) {
+            root.controller.showText(qsTr("Could not capture the current video frame"));
+            return;
+        }
+        root.screenshotSentence = root.cleanSubtitleText(result.text);
+        root.screenshotSentencePending = root.screenshotSentence.trim().length > 0;
+        root.controller.showText(root.screenshotSentencePending ?
+            qsTr("Screenshot copied — press Ctrl+X again for the sentence") :
+            qsTr("Screenshot copied — no subtitle text at this position"));
+    }
+
+    onMovieModeActiveChanged: {
+        menuFadeIn.stop();
+        menuFadeOut.stop();
+        controlsFadeIn.stop();
+        controlsFadeOut.stop();
+        if (root.movieModeActive) {
+            menu.visible = false;
+            controls.visible = false;
+        } else {
+            root.showOsc();
+            interactiveTimer.restart();
+        }
+    }
+
     property bool ocrMode: false
     property bool subtitleRendererReady: false
 
@@ -38,6 +139,8 @@ MpvPlayer {
     signal jimakuSearchRequested()
     signal nextSubtitleSearchRequested()
     signal torrentSearchRequested()
+    signal statisticsRequested()
+    signal aniListSearchRequested()
 
     enum OscVisibility
     {
@@ -52,7 +155,7 @@ MpvPlayer {
      * Shows the OSC with fade in.
      */
     function showOsc() {
-        if (root.ocrMode)
+        if (root.ocrMode || root.movieModeActive)
         {
             return;
         }
@@ -132,7 +235,8 @@ MpvPlayer {
         {
             return;
         }
-        const useMemento = MementoSettings.searchHideMpvSubs;
+        const useMemento = MementoSettings.searchHideMpvSubs ||
+            root.privateSubtitlesActive;
         const useMpvPrimary = root.ocrMode || !useMemento ||
             root.primarySubtitleIsBitmap;
         const useMpvSecondary = root.ocrMode || !useMemento ||
@@ -150,7 +254,7 @@ MpvPlayer {
         root.controller.setSubtitleVisibility(
             useMpvPrimary && primaryShown);
         root.controller.setSecondarySubtitleVisibility(
-            useMpvSecondary && secondaryShown);
+            useMpvSecondary && secondaryShown && (!secondarySubtitleWindow.visible || root.secondarySubtitleIsBitmap));
     }
 
     onPrimarySubtitleIsBitmapChanged: root.synchronizeSubtitleRenderers()
@@ -176,11 +280,19 @@ MpvPlayer {
     }
 
     onFileLoaded: {
+        root.screenshotSentencePending = false;
         root.synchronizeSubtitleRenderers();
-        if (JimakuClient.autoFetch && JimakuClient.apiKeyConfigured)
+        JimakuClient.cancel();
+        KitsunekkoClient.cancel();
+        if (JimakuClient.autoFetch)
         {
             Qt.callLater(function() {
-                JimakuClient.fetchForCurrentMedia();
+                const link = EpisodeLibrary.subtitleLinkForFile(root.state.path);
+                if (link.provider === "kitsunekko")
+                    KitsunekkoClient.fetchLinkedForCurrentMedia();
+                else if (JimakuClient.apiKeyConfigured &&
+                         (!link.provider || link.provider === "jimaku"))
+                    JimakuClient.fetchForCurrentMedia();
             });
         }
     }
@@ -192,7 +304,27 @@ MpvPlayer {
             event.accepted = true;
             return;
         }
+        if (event.modifiers === Qt.NoModifier &&
+            (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+            if (!event.isAutoRepeat) controls.beginSeek(event.key === Qt.Key_Left ? -1 : 1);
+            event.accepted = true;
+            return;
+        }
         root.controller.sendKeyPress(event.key, event.modifiers);
+    }
+
+    Keys.onReleased: function(event) {
+        if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+            if (!event.isAutoRepeat) controls.endSeek(event.key === Qt.Key_Left ? -1 : 1, false);
+            event.accepted = true;
+        }
+    }
+    onActiveFocusChanged: { if (!activeFocus) controls.resetSeekGesture(); }
+    Connections {
+        target: Qt.application
+        function onStateChanged() {
+            if (Qt.application.state !== Qt.ApplicationActive) controls.resetSeekGesture();
+        }
     }
 
     onCursorPositionChanged: root.mouseMoved(root.cursorPosition.x, root.cursorPosition.y)
@@ -251,9 +383,22 @@ MpvPlayer {
     Action {
         id: copySubtitleSelectionAction
         objectName: "copyCurrentSubtitleAction"
-        enabled: root.activeFocus && subtitleText.text.trim().length > 0
+        enabled: root.playerShortcutAllowed() && subtitleText.text.trim().length > 0
         shortcut: StandardKey.Copy
-        onTriggered: subtitleClipboard.setText(subtitleText.text)
+        onTriggered: root.copyCurrentSubtitle()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+X"
+        autoRepeat: false
+        enabled: root.playerShortcutAllowed() && root.state.path.length > 0
+        onActivated: root.copyScreenshotAndSentence()
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.movieModeActive && !root.ocrMode && root.playerShortcutAllowed()
+        onActivated: root.controller.setFullscreen(false)
     }
 
     Connections {
@@ -267,6 +412,16 @@ MpvPlayer {
         function onExportFailed(error) {
             root.controller.showText(
                 qsTr("Migaku export failed: %1").arg(error));
+        }
+    }
+
+    Connections {
+        target: KitsunekkoClient
+        function onSubtitleAttached(fileName, entryName) {
+            root.controller.showText(qsTr("Linked subtitle loaded: %1").arg(fileName));
+        }
+        function onFailed(error) {
+            root.controller.showText(qsTr("Kitsunekko: %1").arg(error));
         }
     }
 
@@ -648,6 +803,7 @@ MpvPlayer {
 
     SubtitleText {
         id: subtitleText
+        opacity: root.privateSubtitlesActive ? 0 : 1
 
 
         anchors {
@@ -707,7 +863,7 @@ MpvPlayer {
                 return false;
             }
 
-            if (!MementoSettings.searchHideMpvSubs ||
+            if (!(MementoSettings.searchHideMpvSubs || root.privateSubtitlesActive) ||
                 root.primarySubtitleIsBitmap)
             {
                 return false;
@@ -803,6 +959,7 @@ MpvPlayer {
 
     SubtitleText {
         id: secondarySubtitleText
+        opacity: root.privateSubtitlesActive ? 0 : 1
 
         anchors {
             horizontalCenter: root.horizontalCenter
@@ -849,7 +1006,8 @@ MpvPlayer {
         }
 
         visible: {
-            if (root.ocrMode || !MementoSettings.searchHideMpvSubs ||
+            if (secondarySubtitleWindow.visible || root.ocrMode ||
+                !(MementoSettings.searchHideMpvSubs || root.privateSubtitlesActive) ||
                 root.secondarySubtitleIsBitmap || !menu.showSubtitles ||
                 root.state.secondarySid <= 0)
             {
@@ -894,8 +1052,119 @@ MpvPlayer {
         }
     }
 
+    // A separate top-level surface stays visible locally while a capture of
+    // the Memento player window contains only the video and its controls.
+    Window {
+        id: privatePrimarySubtitleWindow
+        title: qsTr("Memento — Private subtitles")
+        transientParent: root.Window.window
+        flags: Qt.Tool | Qt.FramelessWindowHint |
+            Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus
+        color: "transparent"
+        width: root.width
+        height: Math.max(1, Math.ceil(subtitleText.height))
+        visible: root.privateSubtitlesActive && subtitleText.visible &&
+            subtitleText.text.length > 0 && root.Window.window?.visible &&
+            root.Window.window?.visibility !== Window.Minimized
+        onVisibleChanged: Qt.callLater(root.updatePrivateSubtitleWindowPosition)
+
+        SubtitleText {
+            x: subtitleText.x
+            y: 0
+            width: subtitleText.width
+            height: subtitleText.height
+            transformOrigin: Item.Bottom
+            scale: subtitleText.scale
+            visible: subtitleText.visible
+            text: subtitleText.text
+            font: subtitleText.font
+            color: subtitleText.color
+            background: subtitleText.background
+            stroke: subtitleText.stroke
+            strokeSize: subtitleText.strokeSize
+            lineSpacing: subtitleText.lineSpacing
+        }
+    }
+
+    Window {
+        id: privateSecondarySubtitleWindow
+        title: qsTr("Memento — Private secondary subtitles")
+        transientParent: root.Window.window
+        flags: Qt.Tool | Qt.FramelessWindowHint |
+            Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus
+        color: "transparent"
+        width: root.width
+        height: Math.max(1, Math.ceil(secondarySubtitleText.height))
+        visible: root.privateSubtitlesActive && secondarySubtitleText.visible &&
+            secondarySubtitleText.text.length > 0 && root.Window.window?.visible &&
+            root.Window.window?.visibility !== Window.Minimized
+        onVisibleChanged: Qt.callLater(root.updatePrivateSubtitleWindowPosition)
+
+        SubtitleText {
+            x: secondarySubtitleText.x
+            y: 0
+            width: secondarySubtitleText.width
+            height: secondarySubtitleText.height
+            transformOrigin: Item.Top
+            scale: secondarySubtitleText.scale
+            visible: secondarySubtitleText.visible
+            text: secondarySubtitleText.text
+            font: secondarySubtitleText.font
+            color: secondarySubtitleText.color
+            background: secondarySubtitleText.background
+            stroke: secondarySubtitleText.stroke
+            strokeSize: secondarySubtitleText.strokeSize
+            lineSpacing: secondarySubtitleText.lineSpacing
+        }
+    }
+
+    Window {
+        id: secondarySubtitleWindow
+        title: qsTr("Memento — Secondary subtitles")
+        width: 900
+        height: 300
+        minimumWidth: 360
+        minimumHeight: 160
+        color: "#101010"
+        transientParent: null
+        onVisibleChanged: root.synchronizeSubtitleRenderers()
+
+        Text {
+            anchors.fill: parent
+            anchors.margins: 24
+            color: MementoSettings.interfaceSubtitleColor
+            font.family: MementoSettings.interfaceSubtitleFont.family
+            font.pixelSize: Math.max(24, Math.min(64, secondarySubtitleWindow.height * 0.16))
+            minimumPixelSize: 12
+            fontSizeMode: Text.Fit
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: {
+                if (root.state.secondarySid <= 0)
+                    return qsTr("Select a secondary subtitle track from Subtitles → Second Track.");
+                if (root.secondarySubtitleIsBitmap)
+                    return qsTr("This window requires a text subtitle track (such as SRT or ASS).");
+                if (!menu.showSubtitles || (MementoSettings.searchHideSubs && !root.state.pause))
+                    return "";
+                return secondarySubtitleText.text;
+            }
+        }
+        Shortcut {
+            sequence: "F11"
+            onActivated: secondarySubtitleWindow.visibility === Window.FullScreen ?
+                secondarySubtitleWindow.showNormal() : secondarySubtitleWindow.showFullScreen()
+        }
+        Shortcut {
+            sequence: "Escape"
+            onActivated: secondarySubtitleWindow.showNormal()
+        }
+    }
+
     PlayerMenu {
         id: menu
+        objectName: "playerMenuBar"
         anchors {
             left: parent.left
             right: parent.right
@@ -903,9 +1172,28 @@ MpvPlayer {
         }
         visible: Features.isMacos
         player: root
+        movieModeEnabled: movieSettings.enabled
+        streamSubtitlesIncluded: streamSettings.includeTextSubtitles
+        streamSubtitlesCanBeHidden: root.streamSubtitlesCanBeHidden
+        onStreamSubtitlesIncludedRequested: function(included) {
+            streamSettings.includeTextSubtitles = included;
+        }
+        onMovieModeToggled: movieSettings.enabled = !movieSettings.enabled
+        secondarySubtitlesDetached: secondarySubtitleWindow.visible
+        onDetachSecondarySubtitlesRequested: {
+            if (secondarySubtitleWindow.visible) {
+                secondarySubtitleWindow.close();
+            } else {
+                secondarySubtitleWindow.show();
+                secondarySubtitleWindow.raise();
+                secondarySubtitleWindow.requestActivate();
+            }
+        }
         onJimakuSearchRequested: root.jimakuSearchRequested()
         onNextSubtitleSearchRequested: root.nextSubtitleSearchRequested()
         onTorrentSearchRequested: root.torrentSearchRequested()
+        onStatisticsRequested: root.statisticsRequested()
+        onAniListSearchRequested: root.aniListSearchRequested()
         onShowSubtitlesChanged: root.synchronizeSubtitleRenderers()
 
         OpacityAnimator on opacity {
@@ -929,6 +1217,7 @@ MpvPlayer {
 
     PlayerControls {
         id: controls
+        objectName: "playerControlBar"
         anchors {
             left: parent.left
             right: parent.right
@@ -936,6 +1225,10 @@ MpvPlayer {
         }
         visible: false
         player: root
+        canCopySubtitle: subtitleText.text.trim().length > 0
+        sentencePending: root.screenshotSentencePending
+        onCopySubtitleRequested: root.copyCurrentSubtitle()
+        onCopyScreenshotRequested: root.copyScreenshotAndSentence()
 
         OpacityAnimator on opacity {
             id: controlsFadeIn

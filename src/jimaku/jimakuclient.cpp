@@ -325,6 +325,23 @@ void JimakuClient::fetchForCurrentMedia()
     m_file = {};
     setBusy(true);
 
+    const QVariantMap link = m_context->episodeLibrary()->subtitleLinkForFile(m_media.path);
+    if (!link.isEmpty())
+    {
+        bool validId = false;
+        const qint64 entryId = link.value("entryId").toLongLong(&validId);
+        if (link.value("provider").toString() != "jimaku" || !validId || entryId <= 0)
+        {
+            finishError(tr("The saved subtitle source is not a valid Jimaku title."));
+            return;
+        }
+        m_entryName = link.value("name").toString();
+        setStatus(tr("Loading linked title %1 — episode %2…")
+            .arg(m_entryName).arg(m_media.episode));
+        beginFileList(generation, entryId, true);
+        return;
+    }
+
     if (m_media.episode >= 0)
     {
         setStatus(tr("Searching Jimaku for %1 — episode %2…")

@@ -2114,6 +2114,12 @@ QVariantMap EpisodeFolder::playbackInfo(const QString &file) const
         {"filename", item.relativePaths.at(episode)}, {"siblings", item.relativePaths}};
 }
 
+QStringList EpisodeFolder::episodeNamesForKey(const QString &key) const
+{
+    const int index = findEntryById(key);
+    return index < 0 ? QStringList{} : m_entries.at(index).relativePaths;
+}
+
 QVariantMap EpisodeFolder::subtitleLinkForFile(const QString &file) const
 {
     const int index = findEntryForFile(file, nullptr);

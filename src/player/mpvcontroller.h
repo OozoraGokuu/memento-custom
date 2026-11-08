@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <QVariantMap>
+
 #include <QObject>
 
 #include <functional>
@@ -225,6 +227,13 @@ public:
     Q_INVOKABLE void seek(double time);
 
     /**
+     * @brief Seeks forward or backward from the current playback position.
+     *
+     * @param seconds Positive to seek forward, negative to seek backward.
+     */
+    Q_INVOKABLE void seekRelative(double seconds);
+
+    /**
      * @brief Pauses playback.
      */
     Q_INVOKABLE void pause();
@@ -393,6 +402,9 @@ public:
      */
     [[nodiscard]]
     QImage screenshotRaw(bool subtitles);
+
+    /** Copy a subtitle-bearing frame and return its matching subtitle text. */
+    Q_INVOKABLE QVariantMap copySubtitleScreenshot();
 
     /**
      * @brief Capture a subtitle screenshot with explicit per-slot visibility.

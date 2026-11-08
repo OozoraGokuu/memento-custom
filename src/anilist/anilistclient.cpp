@@ -281,6 +281,26 @@ QVariantMap AniListClient::mapping(const QString &key) const
 {
     return m_config.value("mappings").toObject().value(key).toObject().toVariantMap();
 }
+QVariantMap AniListClient::suggestedOffset(const QString &key, int resultIndex) const
+{
+    if (key.isEmpty() || resultIndex < 0 || resultIndex >= m_results.size())
+        return {{"confident", false}, {"offset", 0},
+            {"explanation", tr("Select an AniList title to detect the offset.")}};
+    QStringList names;
+    QString currentName;
+    if (key == currentKey())
+    {
+        names = m_current.value("siblings").toStringList();
+        currentName = m_current.value("filename").toString();
+    }
+    else if (m_library)
+    {
+        names = m_library->episodeNamesForKey(key);
+    }
+    if (names.isEmpty() && !currentName.isEmpty()) names.append(currentName);
+    return inferOffset(names, currentName,
+        m_results.at(resultIndex).toMap().value("episodes").toInt());
+}
 void AniListClient::linkTitle(const QString &key, int resultIndex, int offset)
 {
     if (key.isEmpty() || resultIndex < 0 || resultIndex >= m_results.size()) return;
@@ -364,6 +384,76 @@ int AniListClient::episodeFromSiblings(const QString &name, const QStringList &s
         result = it.value();
     }
     return result;
+}
+QVariantMap AniListClient::inferOffset(const QStringList &names,
+    const QString &currentName, int episodeCount)
+{
+    const auto unknown = [](const QString &reason) -> QVariantMap {
+        return {{"confident", false}, {"offset", 0}, {"episode", 0},
+            {"explanation", reason}};
+    };
+    if (names.isEmpty())
+        return unknown(tr("Play an episode from this title to detect its numbering."));
+
+    static const QRegularExpression seasonMarker(
+        R"((?:^|[\s._/\\-])S0*(\d{1,2})E0*\d{1,4})",
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression seasonFolder(
+        R"((?:^|[\s._/\\-])Season[\s._-]*0*(\d{1,2})(?:[\s._/\\-]|$))",
+        QRegularExpression::CaseInsensitiveOption);
+    QSet<int> seasons;
+    QSet<int> numbers;
+    int parsedCount = 0;
+    for (const QString &name : names)
+    {
+        const auto marker = seasonMarker.match(name);
+        const auto folder = seasonFolder.match(name);
+        if (marker.hasMatch()) seasons.insert(marker.captured(1).toInt());
+        else if (folder.hasMatch()) seasons.insert(folder.captured(1).toInt());
+        int episode = episodeFromName(name);
+        if (episode <= 0) episode = episodeFromSiblings(name, names);
+        if (episode > 0) { numbers.insert(episode); ++parsedCount; }
+    }
+    if (seasons.size() > 1)
+        return unknown(tr("This folder contains multiple seasons. Link one season at a time."));
+
+    int current = episodeFromName(currentName);
+    if (current <= 0) current = episodeFromSiblings(currentName, names);
+    if (current <= 0 && !currentName.isEmpty())
+        return unknown(tr("The playing file's episode number is unclear. Confirm it manually."));
+    if (numbers.isEmpty())
+        return unknown(tr("No reliable episode numbers were found in these filenames."));
+
+    const int first = *std::min_element(numbers.cbegin(), numbers.cend());
+    const int last = *std::max_element(numbers.cbegin(), numbers.cend());
+    const bool completeSeason = episodeCount > 0 &&
+        parsedCount == names.size() && numbers.size() == episodeCount &&
+        last - first + 1 == episodeCount;
+    const bool explicitEpisode = seasonMarker.match(currentName).hasMatch();
+    int offset = 0;
+    QString explanation;
+    if (completeSeason)
+    {
+        offset = 1 - first;
+        explanation = offset == 0 ?
+            tr("The files form a complete season numbered from episode 1.") :
+            tr("The files form a complete season numbered %1–%2; AniList starts at 1.")
+                .arg(first).arg(last);
+    }
+    else if (current > 0 && (episodeCount <= 0 || current <= episodeCount) &&
+        (explicitEpisode || (episodeCount > 0 && parsedCount == names.size() && last <= episodeCount)))
+    {
+        explanation = explicitEpisode ?
+            tr("The filename uses season and episode numbering, so no offset is needed.") :
+            tr("The local episode numbers fit within this AniList season.");
+    }
+    else
+    {
+        return unknown(tr("The available files do not establish a safe offset for this season. Enter it manually."));
+    }
+    return {{"confident", true}, {"offset", offset},
+        {"episode", current > 0 ? current + offset : 0},
+        {"explanation", explanation}};
 }
 QString AniListClient::episodeOverrideKey() const
 {

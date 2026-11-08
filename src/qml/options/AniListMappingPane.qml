@@ -8,12 +8,31 @@ ColumnLayout {
     property string targetKey: ""
     property string targetTitle: ""
     property int selectedResult: -1
+    property bool offsetConfirmed: false
     readonly property var link: {
         const revision = AniListClient.revision;
         return AniListClient.mapping(targetKey);
     }
+    readonly property var offsetSuggestion: {
+        const results = AniListClient.results;
+        return AniListClient.suggestedOffset(root.targetKey, root.selectedResult);
+    }
     spacing: 10
-    onTargetKeyChanged: { selectedResult = -1; searchField.text = targetTitle; }
+    onTargetKeyChanged: {
+        selectedResult = -1;
+        offsetConfirmed = false;
+        offset.value = link.offset || 0;
+    }
+    onTargetTitleChanged: searchField.text = targetTitle
+    onSelectedResultChanged: {
+        offsetConfirmed = false;
+        offset.value = selectedResult >= 0 && offsetSuggestion.confident ?
+            offsetSuggestion.offset : (link.offset || 0);
+    }
+    onOffsetSuggestionChanged: {
+        if (selectedResult >= 0 && !offsetConfirmed && offsetSuggestion.confident)
+            offset.value = offsetSuggestion.offset;
+    }
 
     Label {
         Layout.fillWidth: true
@@ -39,7 +58,7 @@ ColumnLayout {
         }
         Button {
             text: qsTr("Search")
-            enabled: root.targetKey.length > 0 && searchField.text.trim().length >= 2
+            enabled: searchField.text.trim().length >= 2 && !AniListClient.busy
             onClicked: { root.selectedResult = -1; AniListClient.search(searchField.text); }
         }
     }
@@ -64,11 +83,26 @@ ColumnLayout {
         SpinBox {
             id: offset
             from: -9999; to: 9999; editable: true
-            value: root.link.offset || 0
+            value: 0
+            onValueModified: root.offsetConfirmed = true
+        }
+        Button {
+            text: qsTr("Use detected")
+            visible: root.selectedResult >= 0 && root.offsetSuggestion.confident
+            onClicked: {
+                offset.value = root.offsetSuggestion.offset;
+                root.offsetConfirmed = false;
+            }
+        }
+        Button {
+            text: qsTr("Confirm offset")
+            visible: root.selectedResult >= 0 && !root.offsetSuggestion.confident && !root.offsetConfirmed
+            onClicked: root.offsetConfirmed = true
         }
         Button {
             text: qsTr("Link selected title")
-            enabled: root.targetKey.length > 0 && root.selectedResult >= 0 && !AniListClient.busy
+            enabled: root.targetKey.length > 0 && root.selectedResult >= 0 && !AniListClient.busy &&
+                (root.offsetSuggestion.confident || root.offsetConfirmed)
             onClicked: AniListClient.linkTitle(root.targetKey, root.selectedResult, offset.value)
         }
         Button {
@@ -79,7 +113,17 @@ ColumnLayout {
     }
     Label {
         Layout.fillWidth: true
-        text: qsTr("AniList episode = filename episode + offset. For example, episode 13 with offset −12 becomes episode 1. Link folders containing one AniList season.")
+        visible: root.selectedResult >= 0
+        text: root.offsetSuggestion.confident ?
+            qsTr("Automatic: %1%2").arg(root.offsetSuggestion.explanation)
+                .arg(root.offsetSuggestion.episode > 0 ?
+                    qsTr(" Playing file → AniList episode %1.").arg(root.offsetSuggestion.episode) : "") :
+            root.offsetSuggestion.explanation
+        wrapMode: Text.Wrap
+    }
+    Label {
+        Layout.fillWidth: true
+        text: qsTr("AniList episode = filename episode + offset. The offset is filled automatically when the filenames establish it; you can edit it before linking.")
         wrapMode: Text.Wrap
     }
     RowLayout {

@@ -2,6 +2,8 @@ add_library(
     context
     context.cpp
     context.h
+    immersionstats.cpp
+    immersionstats.h
 )
 target_compile_features(context PRIVATE cxx_std_20)
 target_include_directories(context PRIVATE ${MEMENTO_INCLUDE_DIRS})

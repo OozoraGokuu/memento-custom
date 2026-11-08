@@ -92,6 +92,30 @@ private slots:
         const QStringList ambiguous{"Show 1 Part 1.mkv", "Show 2 Part 1.mkv", "Show 1 Part 2.mkv"};
         QCOMPARE(AniListClient::episodeFromSiblings(ambiguous.first(), ambiguous), 0);
     }
+    void automaticOffsetDetection() {
+        const auto explicitLocal = AniListClient::inferOffset(
+            {"Oshi no Ko S01E05.mkv"}, "Oshi no Ko S01E05.mkv", 11);
+        QCOMPARE(explicitLocal.value("confident").toBool(), true);
+        QCOMPARE(explicitLocal.value("offset").toInt(), 0);
+        QCOMPARE(explicitLocal.value("episode").toInt(), 5);
+
+        QStringList absolute;
+        for (int episode = 13; episode <= 24; ++episode)
+            absolute.append(QString("Show - %1.mkv").arg(episode));
+        const auto adjusted = AniListClient::inferOffset(absolute, "Show - 15.mkv", 12);
+        QCOMPARE(adjusted.value("confident").toBool(), true);
+        QCOMPARE(adjusted.value("offset").toInt(), -12);
+        QCOMPARE(adjusted.value("episode").toInt(), 3);
+
+        const auto partial = AniListClient::inferOffset(
+            {"Show - 49.mkv", "Show - 50.mkv", "Show - 51.mkv"},
+            "Show - 50.mkv", 12);
+        QCOMPARE(partial.value("confident").toBool(), false);
+        const auto mixed = AniListClient::inferOffset(
+            {"Season 1/Show - 01.mkv", "Season 2/Show - 02.mkv"},
+            "Season 2/Show - 02.mkv", 12);
+        QCOMPARE(mixed.value("confident").toBool(), false);
+    }
     void libraryInferenceAndSeasonBounds() {
         QTemporaryDir folder;
         QVERIFY(folder.isValid());
@@ -103,6 +127,7 @@ private slots:
         AniListClient c(&library); prepare(c);
         c.refreshCurrent(folder.filePath("Slam Dunk 49 Last Fight.mkv"));
         const QString key = c.currentKey();
+        QCOMPARE(library.episodeNamesForKey(key).size(), 3);
         c.m_config.insert("mappings", QJsonObject{{key, QJsonObject{{"id", 101}, {"episodes", 101}}}});
         QCOMPARE(c.currentEpisode(), 49);
         c.m_current.insert("filename", "86 02 Next.mkv");

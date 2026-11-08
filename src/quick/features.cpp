@@ -20,6 +20,8 @@
 
 #include "quick/features.h"
 
+#include <QGuiApplication>
+
 #include "constant/version.h"
 
 Features::Features(QObject *parent) : QObject(parent)
@@ -82,6 +84,11 @@ bool Features::isMacos() const noexcept
 #else
     return false;
 #endif
+}
+
+bool Features::isX11() const noexcept
+{
+    return QGuiApplication::platformName() == QLatin1String("xcb");
 }
 
 Features::Platform Features::platform() const noexcept

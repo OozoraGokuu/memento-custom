@@ -74,6 +74,7 @@
 #include "setting/migration.h"
 #include "setting/settings.h"
 #include "state/context.h"
+#include "state/immersionstats.h"
 #include "subtitle/subtitlelistmodel.h"
 #include "subtitle/subtitlelists.h"
 #include "util/utils.h"
@@ -313,6 +314,9 @@ static void registerQmlTypes(Context &context)
     qmlRegisterType<Clipboard>(MEMENTO_URI, 1, 0, "Clipboard");
     qmlRegisterSingletonInstance<EpisodeFolder>(
         MEMENTO_URI, 1, 0, "EpisodeLibrary", context.episodeLibrary()
+    );
+    qmlRegisterSingletonInstance<ImmersionStats>(
+        MEMENTO_URI, 1, 0, "ImmersionStats", context.immersionStats()
     );
     qmlRegisterSingletonInstance<Features>(
         MEMENTO_URI, 1, 0, "Features", new Features(&context)

@@ -13,6 +13,7 @@
 #include <QTimer>
 #include <QFile>
 #include <QQuickWindow>
+#include <QQuickItem>
 #ifdef MEMENTO_MECAB_SUPPORT
 #include "dict/mecabquerygenerator.h"
 #endif
@@ -77,6 +78,27 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
     if (!copyAction || !QMetaObject::invokeMethod(copyAction, "triggered", Q_ARG(QObject *, nullptr)) ||
         QGuiApplication::clipboard()->text() != QStringLiteral("猫です。\n犬もいます。")) {
         fail("Copy-current-subtitle did not copy the complete cue with the subtitle list closed."); return;
+    }
+    if (qEnvironmentVariableIsSet("MEMENTO_TEST_MOVIE_COPY")) {
+        auto *player = context.player();
+        auto *menu = player->findChild<QQuickItem *>("playerMenuBar");
+        auto *controls = player->findChild<QQuickItem *>("playerControlBar");
+        auto *copyButton = player->findChild<QQuickItem *>("copySubtitleButton");
+        if (!menu || !controls || !copyButton) { fail("Copy/movie controls missing."); return; }
+        copyButton->forceActiveFocus();
+        if (!copyAction->property("enabled").toBool()) {
+            fail("Copy shortcut disabled while a player control has focus."); return;
+        }
+        player->state()->setFullscreen(true);
+        QMetaObject::invokeMethod(player, "showOsc");
+        if (!player->property("movieModeActive").toBool() || menu->isVisible() || controls->isVisible()) {
+            fail("Movie mode exposed the player bars."); return;
+        }
+        player->state()->setFullscreen(false);
+        if (player->property("movieModeActive").toBool()) {
+            fail("Movie mode remained active after leaving fullscreen."); return;
+        }
+        qInfo("Movie/copy check: copy from controls, fullscreen bar suppression and exit passed.");
     }
     const QString libraryScreenshot = qEnvironmentVariable("MEMENTO_TEST_LIBRARY_SCREENSHOT");
     if (!libraryScreenshot.isEmpty()) {
@@ -220,6 +242,28 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
                 if (QGuiApplication::clipboard()->text() != primary->activeText()) return;
                 if (!*observedLoading || player->loading() || player->buffering()) { fail("Episode loading state did not start and clear around playback."); return; }
                 phase = 3;
+                if (qEnvironmentVariableIsSet("MEMENTO_TEST_MOVIE_COPY")) {
+                    context.settings()->setBehaviorSubtitleAutoCopy(false);
+                    if (!QMetaObject::invokeMethod(player, "copyScreenshotAndSentence") ||
+                        QGuiApplication::clipboard()->image().isNull() ||
+                        !player->property("screenshotSentencePending").toBool()) {
+                        fail("First copy did not produce an image and pending sentence."); return;
+                    }
+                    const QString captured = player->property("screenshotSentence").toString();
+                    const QImage image = QGuiApplication::clipboard()->image();
+                    if (!image.save(QDir(qEnvironmentVariable("MEMENTO_TEST_EXPORT")).filePath("clipboard.png"))) {
+                        fail("Could not save clipboard verification image."); return;
+                    }
+                    player->state()->subtitle()->setText("Changed after screenshot");
+                    if (!QMetaObject::invokeMethod(player, "copyScreenshotAndSentence") ||
+                        QGuiApplication::clipboard()->text() != captured ||
+                        player->property("screenshotSentencePending").toBool()) {
+                        fail("Second copy did not preserve the captured sentence."); return;
+                    }
+                    qInfo("Movie/copy check: image clipboard and matching second sentence passed.");
+                    QCoreApplication::exit(0);
+                    return;
+                }
                 context.migakuClient()->exportCurrentSubtitle();
             }
         });

@@ -51,6 +51,42 @@ private slots:
     }
 
 
+    void nextEpisodeAutomaticallyUsesSavedSeriesLink()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        for (const auto &name : {"Show - 23.mkv", "Show - 24.mkv"}) {
+            QFile file(folder.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test");
+        }
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const QVariantMap link = {{"provider", "kitsunekko"}, {"name", "Chosen Show"}, {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Chosen/"}};
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(folder.filePath("Show - 23.mkv"), link));
+        const QString next = folder.filePath("Show - 24.mkv");
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(next), link);
+        player.state()->setPath(next);
+        KitsunekkoClient client(&context);
+        client.fetchLinkedForCurrentMedia();
+        QVERIFY(client.m_reply);
+        QVERIFY(client.m_reply->url().path().endsWith("/git/trees/" + QString(40, 'a')));
+        QCOMPARE(client.selectedEpisode(), 24);
+        QCOMPARE(client.m_mediaPath, next);
+        QCOMPARE(client.selectedEntryName(), QString("Chosen Show"));
+        client.cancel();
+        context.setPlayer(nullptr);
+    }
+
+    void automaticAttachmentRequiresOneExactEpisode()
+    {
+        const QVariantMap first{{"episode", 23}}, next{{"episode", 24}}, unknown{{"episode", -1}};
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({first, unknown, next}, 24), 2);
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({first, unknown}, 24), -1);
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({next, next}, 24), -1);
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({unknown}, -1), -1);
+    }
+
     void linkedTitleBypassesCatalog()
     {
         KitsunekkoClient client(nullptr);

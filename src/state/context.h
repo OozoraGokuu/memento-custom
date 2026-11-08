@@ -36,6 +36,7 @@
 #include "quick/fileopenhandler.h"
 #include "quick/keytracker.h"
 #include "setting/settings.h"
+#include "state/immersionstats.h"
 #include "subtitle/subtitlelists.h"
 #include "util/utils.h"
 
@@ -113,6 +114,7 @@ public:
      */
     [[nodiscard]]
     EpisodeFolder *episodeLibrary() const noexcept;
+    ImmersionStats *immersionStats() const noexcept { return m_immersionStats; }
     AniListClient *aniListClient() const noexcept { return m_aniListClient; }
 
     /**
@@ -187,6 +189,8 @@ private:
 
     /* The persistent episode and torrent library. Has ownership. */
     EpisodeFolder *m_episodeLibrary{new EpisodeFolder(this)};
+
+    ImmersionStats *m_immersionStats{new ImmersionStats(m_episodeLibrary, this)};
 
     AniListClient *m_aniListClient{new AniListClient(m_episodeLibrary, this)};
 

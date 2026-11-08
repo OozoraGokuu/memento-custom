@@ -1,15 +1,10 @@
-# Memento Custom 2.3.3
+# Memento Custom 2.3.4
 
-Fixes AniList progress syncing for filenames such as `Slam Dunk 49 Takezono, Last Fight.mkv`.
+This release updates playback controls and the study workflow.
 
-- Uses neighboring filenames in the same library folder or torrent to recognize a consistent numbered episode series. Explicit `S01E49`, `EP49`, and ` - 49` formats retain priority.
-- Avoids guessing when numeric fields are ambiguous, are metadata, or exceed the linked season’s episode count after applying its offset.
-- Saves manual episode corrections across restarts and changing torrent playback URLs. Corrections are scoped to the file and linked season/offset. **Detect automatically** clears a correction.
-- Invalidates an older queued update when its episode number is corrected, preventing an outstanding read from submitting the previous number.
-- Shows an explanation in AniList settings when the episode needs confirmation.
+- Rewind and forward buttons now seek exactly 5 seconds relative to the current position, like mpv's default left and right keys. Repeated presses continue in the chosen direction.
+- Adds an immersion statistics tab and an AniList search dialog with episode matching and offset controls.
+- Fixes selection from the media-library episode list.
+- Adds **Subtitle → Include Subtitles in Stream**. On X11, turning it off keeps text subtitles visible locally while a capture of the Memento application window omits them. Screen sharing and bitmap subtitles cannot be separated this way.
 
-Install the new package over the existing app. Accounts, dictionaries, title links and local progress are preserved. Previously missed episodes are not automatically backfilled; confirm the playing episode and use **Sync now**, or reach the configured playback threshold. Existing AniList progress is never reduced.
-
-Downloads: Windows installer or portable ZIP; Linux Flatpak; macOS ZIP for Apple Silicon (`arm64`) or Intel (`x86_64`, macOS 15+). Windows packages are unsigned; macOS packages are ad-hoc signed and are not Apple-notarized. OCR remains disabled.
-
-Packages are built from clean source and audited for personal profiles and credentials. Tests use synthetic accounts; physical hardware and live account writes are not covered. See [validation coverage](https://github.com/OozoraGokuu/memento-custom/blob/v2.3.3/docs/VALIDATION.md).
+The Windows package is built and checked by GitHub Actions on a Windows runner. It contains no user profile, account, API key, or watch-history files. Install it over an existing version to retain your local settings. The Windows build is unsigned.

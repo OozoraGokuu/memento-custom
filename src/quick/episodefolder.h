@@ -86,6 +86,9 @@ public:
     /** Stable identity and original filename for a playing local/torrent episode. */
     QVariantMap playbackInfo(const QString &file) const;
 
+    /** Original episode names for a library entry, without starting a stream. */
+    Q_INVOKABLE QStringList episodeNamesForKey(const QString &key) const;
+
     QVariantMap lastSubtitleSearch() const { return m_lastSubtitleSearch; }
     Q_INVOKABLE bool rememberSubtitleSearch(const QVariantMap &link, int episode);
     Q_INVOKABLE int defaultAudioTrackForFile(const QString &file) const;

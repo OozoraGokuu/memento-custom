@@ -1,4 +1,5 @@
 import QtQuick
+import QtCore
 import QtQuick.Controls
 import QtQuick.Layouts
 import Ripose.Memento
@@ -7,60 +8,51 @@ Rectangle {
     id: root
 
     required property MpvPlayer player
+    property bool canCopySubtitle: false
+    property bool sentencePending: false
+    signal copySubtitleRequested()
+    signal copyScreenshotRequested()
 
     readonly property real position: durationSlider.position
 
-    property int lastSubtitleSeekDirection: 0
-    property real subtitleSeekOrigin: 0
+    Settings {
+        id: highlightSettings
+        category: "TimestampHighlights"
+        property string saved: "{}"
+    }
 
-    /**
-     * A single press jumps to the adjacent subtitle start. A repeated press in
-     * the same direction changes that gesture to a three-second relative seek.
-     */
-    function subtitleAwareSeek(direction) {
-        if (!Number.isFinite(root.player.state.timePosition)) return;
-        if (subtitleSeekRepeatTimer.running &&
-            root.lastSubtitleSeekDirection === direction)
-        {
-            subtitleSeekRepeatTimer.stop();
-            root.player.controller.seek(Math.max(
-                0, root.subtitleSeekOrigin + direction * 3));
-            root.player.controller.showText(direction < 0 ?
-                qsTr("Back 3 seconds") : qsTr("Forward 3 seconds"));
-            root.lastSubtitleSeekDirection = 0;
+    readonly property var highlightMap: {
+        try { return JSON.parse(highlightSettings.saved); }
+        catch (error) { return {}; }
+    }
+    readonly property var highlights: highlightMap[root.player.state.path] || []
+
+    function highlightTimestamp() {
+        const time = root.player.state.timePosition;
+        const path = root.player.state.path;
+        if (!path || !Number.isFinite(time) || time < 0) return;
+        const map = JSON.parse(highlightSettings.saved || "{}");
+        const items = map[path] || [];
+        if (items.some(t => Math.abs(t - time) < 1)) {
+            root.player.controller.showText(qsTr("This timestamp is already highlighted"));
             return;
         }
-
-        root.subtitleSeekOrigin = root.player.state.timePosition;
-        root.lastSubtitleSeekDirection = direction;
-        subtitleSeekRepeatTimer.restart();
-        const model = SubtitleLists.primary;
-        if (model && model.fullTimelineReady) {
-            const target = model.adjacentSubtitleStart(
-                root.subtitleSeekOrigin, direction, root.player.state.subtitle.delay);
-            if (Number.isFinite(target) && target >= 0)
-                root.player.controller.seek(target);
-        } else {
-            root.player.controller.subtitleSeek(direction, true);
-        }
+        items.push(time);
+        items.sort((a, b) => a - b);
+        map[path] = items;
+        highlightSettings.saved = JSON.stringify(map);
+        highlightSettings.sync();
+        root.player.controller.showText(qsTr("Highlighted %1").arg(Utils.toTimeString(time)));
     }
 
-    Connections {
-        target: root.player.state
-        function onPathChanged() {
-            subtitleSeekRepeatTimer.stop();
-            root.lastSubtitleSeekDirection = 0;
-        }
+    function removeHighlight(time) {
+        const map = JSON.parse(highlightSettings.saved || "{}");
+        map[root.player.state.path] = root.highlights.filter(t => t !== time);
+        highlightSettings.saved = JSON.stringify(map);
+        highlightSettings.sync();
     }
 
-    Timer {
-        id: subtitleSeekRepeatTimer
-        interval: 550
-        repeat: false
-        onTriggered: root.lastSubtitleSeekDirection = 0
-    }
-
-    height: 50
+    height: 84
     color: MementoPalette.window
 
     /* Make sure mouse events aren't sent to mpv */
@@ -70,11 +62,39 @@ Rectangle {
     }
 
     RowLayout {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.rightMargin: 10
+        height: 34
+        ToolButton {
+            objectName: "copySubtitleButton"
+            text: qsTr("Copy text")
+            focusPolicy: Qt.NoFocus
+            enabled: root.canCopySubtitle
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Copy current subtitle (Ctrl+C)")
+            onClicked: root.copySubtitleRequested()
+        }
+
+        ToolButton {
+            objectName: "copyScreenshotButton"
+            text: root.sentencePending ? qsTr("Copy sentence") : qsTr("Copy image")
+            focusPolicy: Qt.NoFocus
+            enabled: root.player.state.path.length > 0
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Ctrl+X: copy screenshot with subtitles, then its sentence")
+            onClicked: root.copyScreenshotRequested()
+        }
+
+    }
+
+    RowLayout {
         id: layout
 
         readonly property int defaultMargin: 10
 
         anchors.fill: parent
+        anchors.topMargin: 34
         anchors.leftMargin: layout.defaultMargin
         anchors.rightMargin: layout.defaultMargin
 
@@ -109,10 +129,10 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             icon.name: MementoSettings.interfaceSystemIcons ? "media-seek-backward" : null
             icon.source: Utils.toImageProvider("fast-rewind", MementoPalette.text)
-            onClicked: root.subtitleAwareSeek(-1)
+            onClicked: root.player.controller.seekRelative(-5)
 
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Previous subtitle · double press: back 3 seconds")
+            ToolTip.text: qsTr("Back 5 seconds")
         }
 
         ToolButton {
@@ -120,10 +140,10 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             icon.name: MementoSettings.interfaceSystemIcons ? "media-seek-forward" : null
             icon.source: Utils.toImageProvider("fast-forward", MementoPalette.text)
-            onClicked: root.subtitleAwareSeek(1)
+            onClicked: root.player.controller.seekRelative(5)
 
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Next subtitle · double press: forward 3 seconds")
+            ToolTip.text: qsTr("Forward 5 seconds")
         }
 
         ToolButton {
@@ -132,6 +152,44 @@ Rectangle {
             icon.name: MementoSettings.interfaceSystemIcons ? "media-skip-forward" : null
             icon.source: Utils.toImageProvider("skip-next", MementoPalette.text)
             onClicked: root.player.controller.playlistNext()
+        }
+
+        ToolButton {
+            id: highlightButton
+            text: root.width < 850 ? "★" : qsTr("★ Highlight")
+            focusPolicy: Qt.NoFocus
+            enabled: !!root.player.state.path && root.player.state.duration > 0
+            onClicked: root.highlightTimestamp()
+            ToolTip.visible: hovered
+            ToolTip.text: qsTr("Save the current timestamp as a highlight")
+            Accessible.name: qsTr("Highlight current timestamp")
+        }
+
+        ToolButton {
+            text: root.width < 850 ? qsTr("★ %1").arg(root.highlights.length) : qsTr("Highlights (%1)").arg(root.highlights.length)
+            focusPolicy: Qt.NoFocus
+            enabled: root.highlights.length > 0
+            onClicked: highlightMenu.popup()
+            Menu {
+                id: highlightMenu
+                Instantiator {
+                    model: root.highlights
+                    delegate: Menu {
+                        required property var modelData
+                        title: "★ " + Utils.toTimeString(modelData)
+                        MenuItem {
+                            text: qsTr("Jump to highlight")
+                            onTriggered: root.player.controller.seek(modelData)
+                        }
+                        MenuItem {
+                            text: qsTr("Remove highlight")
+                            onTriggered: root.removeHighlight(modelData)
+                        }
+                    }
+                    onObjectAdded: (index, object) => highlightMenu.insertMenu(index, object)
+                    onObjectRemoved: (index, object) => highlightMenu.removeMenu(object)
+                }
+            }
         }
 
         Label {
@@ -152,6 +210,7 @@ Rectangle {
             from: 0
             to: root.player.state.duration
             chapters: root.player.state.chapters
+            highlights: root.highlights
             onMoved: root.player.controller.seek(value)
 
             Timer {
@@ -174,6 +233,7 @@ Rectangle {
 
         Slider {
             id: volumeSlider
+            visible: root.width >= 1000
             Layout.preferredWidth: 150
             focusPolicy: Qt.NoFocus
             from: 0
@@ -184,6 +244,7 @@ Rectangle {
 
         Label {
             id: volumeLabel
+            visible: root.width >= 1000
             Layout.leftMargin: layout.defaultMargin
             Layout.rightMargin: layout.defaultMargin
             Layout.preferredWidth: 30

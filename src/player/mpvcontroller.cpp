@@ -30,6 +30,9 @@
 #include <ranges>
 #include <vector>
 
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -492,10 +495,11 @@ bool MpvController::loadFile(
     bool append,
     const QStringList &options)
 {
-    /* Since mpv client API 2.3 (mpv 0.38.0) "loadfile" places an extra argument
-     * before the options, so we need to conditionally re-arrange the arguments
-     * array */
-    constexpr bool IS_API_23{MPV_CLIENT_API_VERSION >= MPV_MAKE_VERSION(2, 3)};
+    /* Since mpv client API 2.3 (mpv 0.38.0) "loadfile" places an insertion
+     * index before the options. Use the loaded library's API version: builds
+     * can use older headers while packaging a newer libmpv. */
+    const bool hasInsertionIndex =
+        ::mpv_client_api_version() >= MPV_MAKE_VERSION(2, 3);
 
     if (file.isEmpty())
     {
@@ -515,8 +519,8 @@ bool MpvController::loadFile(
         "loadfile",
         path,
         append ? "append-play" : "replace",
-        IS_API_23 ? "0" : argOpts,
-        IS_API_23 ? argOpts : nullptr,
+        hasInsertionIndex ? "0" : argOpts,
+        hasInsertionIndex ? argOpts : nullptr,
         nullptr
     };
 
@@ -619,6 +623,21 @@ void MpvController::seek(double time)
     if (::mpv_command_async(handle(), 0, args) < 0)
     {
         qWarning("Seeking failed");
+    }
+}
+
+void MpvController::seekRelative(double seconds)
+{
+    QByteArray offset = QString::number(seconds).toUtf8();
+    const char *args[]{
+        "seek",
+        offset,
+        "relative+exact",
+        nullptr
+    };
+    if (::mpv_command_async(handle(), 0, args) < 0)
+    {
+        qWarning("Relative seek failed");
     }
 }
 
@@ -1108,6 +1127,19 @@ QImage MpvController::screenshotRaw(bool subtitles)
     }
 
     return image;
+}
+
+QVariantMap MpvController::copySubtitleScreenshot()
+{
+    const MpvFrameCapture capture = captureFrames(true, false);
+    if (capture.subtitleFrame.isNull())
+    {
+        return {{"ok", false}};
+    }
+    auto *mime = new QMimeData;
+    mime->setImageData(capture.subtitleFrame);
+    QGuiApplication::clipboard()->setMimeData(mime);
+    return {{"ok", true}, {"text", capture.primaryText}};
 }
 
 QImage MpvController::screenshotRawWithSubtitleVisibility(

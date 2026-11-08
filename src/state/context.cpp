@@ -99,4 +99,5 @@ void Context::setPlayer(MpvPlayer *player) noexcept
 {
     m_player = player;
     m_aniListClient->attachPlayer(player);
+    m_immersionStats->attachPlayer(player);
 }

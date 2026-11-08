@@ -29,6 +29,7 @@ public:
     QVariantList fileResults() const { return m_files; }
     QString selectedEntryName() const { return m_entryName; }
     int selectedEpisode() const { return m_episode; }
+    Q_INVOKABLE void fetchLinkedForCurrentMedia();
     Q_INVOKABLE void refreshCatalog(const QString &query);
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE void selectEntry(int index, int episode = -1);
@@ -47,7 +48,8 @@ private:
     void loadCategory(int index);
     void filterTitles();
     static QVariantList parseFiles(const QByteArray &data, const QString &prefix, int episode);
-    void selectFiles(int index, int episode, bool all, bool persist = true);
+    void selectFiles(int index, int episode, bool all, bool persist = true, bool automatic = false);
+    static int automaticFileIndex(const QVariantList &files, int episode);
     void checkAttached();
     void error(const QString &message);
     Context *m_context;

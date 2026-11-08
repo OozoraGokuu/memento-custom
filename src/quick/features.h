@@ -78,6 +78,12 @@ class Features : public QObject
     )
 
     Q_PROPERTY(
+        bool isX11
+        READ isX11
+        CONSTANT
+    )
+
+    Q_PROPERTY(
         Platform platform
         READ platform
         CONSTANT
@@ -184,6 +190,7 @@ public:
      */
     [[nodiscard]]
     bool isMacos() const noexcept;
+    bool isX11() const noexcept;
 
     /**
      * @brief Get the exact OS this is running on.

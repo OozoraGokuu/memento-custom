@@ -71,6 +71,7 @@ target_compile_options(features PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_link_libraries(
     features
     PRIVATE version
+    PRIVATE Qt6::Gui
     PUBLIC Qt6::Core
 )
 

@@ -174,7 +174,7 @@ QVariantList KitsunekkoClient::parseFiles(const QByteArray &data, const QString 
 
 void KitsunekkoClient::selectEntry(int index, int episode) { selectFiles(index, episode, false); }
 void KitsunekkoClient::selectEntryAllFiles(int index, int episode) { selectFiles(index, episode, true); }
-void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persist)
+void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persist, bool automatic)
 {
     if (index < 0 || index >= m_entries.size()) return;
     cancel();
@@ -195,7 +195,7 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persis
     }
     m_busy = true; m_status = tr("Loading available Japanese subtitles…"); emit changed();
     get(QUrl(api + "git/trees/" + entry.value("sha").toString() + "?recursive=1"),
-        [this, entry, all, episode](const QByteArray &data) {
+        [this, entry, all, episode, automatic](const QByteArray &data) {
         const auto object = QJsonDocument::fromJson(data).object();
         if (!object.contains("tree") || object.value("truncated").toBool()) {
             error(tr("GitHub returned an incomplete subtitle list.")); return;
@@ -206,10 +206,55 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persis
                 {{"provider", "kitsunekko"}, {"name", m_entryName},
                  {"sha", entry.value("sha")}, {"prefix", entry.value("prefix")}}, episode);
         m_busy = false;
+        if (automatic) {
+            if (!m_context || !m_context->player() ||
+                m_context->player()->state()->path() != m_mediaPath) {
+                cancel(); return;
+            }
+            const int index = automaticFileIndex(m_files, episode);
+            if (index < 0) {
+                error(tr("The linked title has no single matching subtitle for episode %1. Open subtitle search to choose a file.").arg(episode));
+                return;
+            }
+            attachResult(index);
+            return;
+        }
         m_status = m_files.isEmpty() ? tr("No files for this episode. Try Show all files.") :
             tr("%1 Japanese subtitle files. Only the file you select will be downloaded.").arg(m_files.size());
         emit changed();
     });
+}
+
+int KitsunekkoClient::automaticFileIndex(const QVariantList &files, int episode)
+{
+    if (episode < 0) return -1;
+    int selected = -1;
+    for (int index = 0; index < files.size(); ++index) {
+        if (files.at(index).toMap().value("episode", -1).toInt() != episode) continue;
+        if (selected >= 0) return -1;
+        selected = index;
+    }
+    return selected;
+}
+
+void KitsunekkoClient::fetchLinkedForCurrentMedia()
+{
+    cancel();
+    if (!m_context || !m_context->player()) return;
+    const auto link = m_context->episodeLibrary()->subtitleLinkForFile(
+        m_context->player()->state()->path());
+    if (link.value("provider").toString() != "kitsunekko") return;
+    if (!validSha(link.value("sha").toString()) ||
+        !link.value("prefix").toString().startsWith("subtitles/") ||
+        link.value("prefix").toString().contains("..")) {
+        error(tr("Invalid saved Kitsunekko link. Use Change link to select it again.")); return;
+    }
+    const int episode = m_context->jimakuClient()->suggestedEpisode();
+    if (episode < 0) {
+        error(tr("Could not determine the episode number for linked subtitles.")); return;
+    }
+    m_entries = {link};
+    selectFiles(0, episode, false, false, true);
 }
 
 void KitsunekkoClient::openLinkedEntry(const QVariantMap &link, int episode, bool all)

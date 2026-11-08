@@ -1,6 +1,7 @@
 import QtCore
 import QtQml.Models
 import QtQuick
+import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Dialogs
 import Ripose.Memento
@@ -9,9 +10,14 @@ MenuBar {
     id: root
 
     required property MpvPlayer player
+    property bool movieModeEnabled: true
+    signal movieModeToggled()
 
     /* true if subtitles should be shown, false if they should be hidden */
     property alias showSubtitles: actionShowSubtitles.checked
+    property bool streamSubtitlesIncluded: true
+    property bool streamSubtitlesCanBeHidden: true
+    signal streamSubtitlesIncludedRequested(bool included)
 
     /* true if any children are under the cursor, false otherwise */
     readonly property bool anyHovered: {
@@ -38,10 +44,67 @@ MenuBar {
         return EpisodeLibrary.isWatched(root.player.state.path);
     }
 
+    property bool secondarySubtitlesDetached: false
+    signal detachSecondarySubtitlesRequested()
+
     signal ocrModeRequested()
     signal jimakuSearchRequested()
     signal nextSubtitleSearchRequested()
     signal torrentSearchRequested()
+    signal aniListSearchRequested()
+    signal statisticsRequested()
+
+
+    Dialog {
+        id: subtitleDelayDialog
+        parent: Overlay.overlay
+        title: qsTr("Subtitle delays")
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Close
+
+        contentItem: ColumnLayout {
+            Label {
+                text: qsTr("Positive values show subtitles later; negative values show them earlier.")
+                wrapMode: Text.WordWrap
+                Layout.preferredWidth: 420
+            }
+            Repeater {
+                model: 2
+                delegate: RowLayout {
+                    required property int index
+                    Label {
+                        text: index === 0 ? qsTr("Main track (ms)") : qsTr("Secondary track (ms)")
+                        Layout.fillWidth: true
+                    }
+                    SpinBox {
+                        id: delayInput
+                        from: -3600000
+                        to: 3600000
+                        stepSize: 100
+                        editable: true
+                        value: Math.round((index === 0 ? root.player.state.subtitle.delay :
+                            root.player.state.secondarySubtitle.delay) * 1000)
+                        onValueModified: {
+                            if (index === 0)
+                                root.player.controller.setSubtitleDelay(value / 1000);
+                            else
+                                root.player.controller.setSecondarySubtitleDelay(value / 1000);
+                        }
+                    }
+                    Button {
+                        text: qsTr("Reset")
+                        onClicked: {
+                            if (index === 0)
+                                root.player.controller.setSubtitleDelay(0);
+                            else
+                                root.player.controller.setSecondarySubtitleDelay(0);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Connections {
         target: root.player.state
@@ -138,6 +201,12 @@ MenuBar {
             checkable: true
             checked: MementoSettings.windowLibrary
             onTriggered: MementoSettings.windowLibrary = checked
+        }
+
+        Action {
+            text: qsTr("Show &Statistics")
+            shortcut: "Ctrl+Shift+S"
+            onTriggered: root.statisticsRequested()
         }
 
         Menu {
@@ -279,6 +348,16 @@ MenuBar {
                 text: qsTr("&Clear Recents")
                 onTriggered: MementoSettings.recentFilesClear()
             }
+        }
+    }
+
+    Menu {
+        title: qsTr("&View")
+        Action {
+            text: qsTr("Movie mode in fullscreen")
+            checkable: true
+            checked: root.movieModeEnabled
+            onTriggered: root.movieModeToggled()
         }
     }
 
@@ -433,6 +512,22 @@ MenuBar {
             }
         }
 
+        Action {
+            text: qsTr("Include Subtitles in Stream")
+            checkable: true
+            checked: root.streamSubtitlesIncluded || !root.streamSubtitlesCanBeHidden
+            enabled: Features.isX11 && root.streamSubtitlesCanBeHidden
+            onTriggered: root.streamSubtitlesIncludedRequested(checked)
+        }
+
+        MenuItem {
+            visible: !Features.isX11 || !root.streamSubtitlesCanBeHidden
+            enabled: false
+            text: !Features.isX11 ?
+                qsTr("Window-share control requires X11") :
+                qsTr("Image subtitles cannot be separated from video")
+        }
+
         MenuSeparator {}
 
         Action {
@@ -461,6 +556,18 @@ MenuBar {
             text: qsTr("Search Japanese &Subtitles...")
             shortcut: "Ctrl+Shift+K"
             onTriggered: root.jimakuSearchRequested()
+        }
+
+        Action {
+            text: qsTr("Subtitle delays…")
+            onTriggered: subtitleDelayDialog.open()
+        }
+
+        Action {
+            text: root.secondarySubtitlesDetached ?
+                qsTr("Return secondary subtitles to video") :
+                qsTr("Detach secondary subtitles…")
+            onTriggered: root.detachSecondarySubtitlesRequested()
         }
 
         Menu {
@@ -563,6 +670,31 @@ MenuBar {
             onObjectRemoved: function(index, object) {
                 subtitleMenu.removeAction(object);
             }
+        }
+    }
+
+    Menu {
+        title: qsTr("Ani&List")
+        width: Math.max(contentWidth + leftPadding + rightPadding, root.minimumMenuWidth)
+
+        Action {
+            text: qsTr("&Search anime…")
+            shortcut: "Ctrl+Shift+A"
+            onTriggered: root.aniListSearchRequested()
+        }
+        Action {
+            text: qsTr("Sync current episode")
+            enabled: AniListClient.connected && AniListClient.enabled &&
+                AniListClient.currentEpisode > 0 &&
+                !!AniListClient.mapping(AniListClient.currentKey).id
+            onTriggered: AniListClient.syncNow()
+        }
+        MenuSeparator {}
+        Action {
+            text: AniListClient.connected ?
+                qsTr("Connected as %1").arg(AniListClient.username) :
+                qsTr("Not connected")
+            enabled: false
         }
     }
 

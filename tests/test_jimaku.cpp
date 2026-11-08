@@ -1,3 +1,4 @@
+#include <QUrlQuery>
 #include "state/context.h"
 #include <QGuiApplication>
 #include <QTemporaryDir>
@@ -91,6 +92,36 @@ private slots:
         player.state()->setPath("/outside.mkv");
         client.selectEntry(0, 23); client.cancel();
         QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(file.fileName()), link);
+        context.setPlayer(nullptr);
+    }
+
+    void nextEpisodeAutomaticallyUsesSavedSeriesLink()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        for (const auto &name : {"Show - 23.mkv", "Show - 24.mkv"}) {
+            QFile file(folder.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test");
+        }
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const QVariantMap link = {{"provider", "jimaku"}, {"name", "Chosen Show"}, {"entryId", 123}};
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(folder.filePath("Show - 23.mkv"), link));
+        const QString next = folder.filePath("Show - 24.mkv");
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(next), link);
+        player.state()->setPath(next);
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl("http://127.0.0.1:1");
+        client.fetchForCurrentMedia();
+        QVERIFY(client.m_reply);
+        QCOMPARE(client.m_reply->url().path(), QString("/api/entries/123/files"));
+        QCOMPARE(QUrlQuery(client.m_reply->url()).queryItemValue("episode"), QString("24"));
+        QVERIFY(client.m_operation == JimakuClient::Operation::Fetch);
+        QCOMPARE(client.m_media.path, next);
+        QCOMPARE(client.selectedEntryName(), QString("Chosen Show"));
+        client.cancel();
         context.setPlayer(nullptr);
     }
 

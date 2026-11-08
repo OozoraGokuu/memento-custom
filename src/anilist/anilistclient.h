@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QSet>
 #include <QVariantList>
+#include <QVariantMap>
 #include <functional>
 
 class EpisodeFolder;
@@ -53,6 +54,7 @@ public:
     Q_INVOKABLE void testConnection();
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE QVariantMap mapping(const QString &key) const;
+    Q_INVOKABLE QVariantMap suggestedOffset(const QString &key, int resultIndex) const;
     Q_INVOKABLE void linkTitle(const QString &key, int resultIndex, int offset = 0);
     Q_INVOKABLE void unlinkTitle(const QString &key);
     Q_INVOKABLE void setCurrentEpisode(int episode);
@@ -78,6 +80,8 @@ private:
     static QUrl authorizationUrl(const QString &clientId, const QString &state);
     static int episodeFromName(const QString &name);
     static int episodeFromSiblings(const QString &name, const QStringList &siblings);
+    static QVariantMap inferOffset(const QStringList &names, const QString &currentName,
+        int episodeCount);
     QString episodeOverrideKey() const;
     static QJsonObject progressUpdate(const QJsonObject &media, int requested);
     EpisodeFolder *m_library;

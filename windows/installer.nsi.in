@@ -925,6 +925,14 @@ Section "install"
 	StrCmp $OperationResult "0" 0 unsafe_stage
 	Call InspectInstallDirectory
 	StrCmp $OperationResult "0" 0 inspect_failed
+	# Refuse an upgrade while the installed executable is running before
+	# extracting or backing up the full payload. The old uninstaller checks
+	# locks too, but only after a potentially expensive staging/backup pass.
+	StrCmp $InstallState "installed" check_running_executable
+	StrCmp $InstallState "partial" check_running_executable checked_running_executable
+	check_running_executable:
+		!insertmacro MementoCheckOwnedFile "$INSTDIR\memento.exe" running_application
+	checked_running_executable:
 
 	# A clean or residual install may merge with unrelated files only when none
 	# of the incoming owned paths or external metadata collide.
@@ -1106,6 +1114,9 @@ Section "install"
 		StrCmp $OperationResult "0" 0 install_rollback_incomplete
 	install_collision:
 		!insertmacro MementoFatal "Setup found an existing file or system entry that it does not own. No unknown file was overwritten."
+
+	running_application:
+		!insertmacro MementoFatal "Memento is running. Close the application before upgrading; no files were changed."
 
 	unsafe_stage:
 		!insertmacro MementoFatal "Setup found unexpected content in its staging directory. No unknown file was removed."
