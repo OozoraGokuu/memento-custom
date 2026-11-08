@@ -227,13 +227,6 @@ public:
     Q_INVOKABLE void seek(double time);
 
     /**
-     * @brief Seeks forward or backward from the current playback position.
-     *
-     * @param seconds Positive to seek forward, negative to seek backward.
-     */
-    Q_INVOKABLE void seekRelative(double seconds);
-
-    /**
      * @brief Pauses playback.
      */
     Q_INVOKABLE void pause();

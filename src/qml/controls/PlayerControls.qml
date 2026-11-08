@@ -14,6 +14,55 @@ Rectangle {
     signal copyScreenshotRequested()
 
     readonly property real position: durationSlider.position
+    property real pendingSubtitleSeekTarget: -1
+    property string pendingSubtitleSeekPath: ""
+
+    Timer {
+        id: pendingSubtitleSeekTimer
+        interval: 700
+        onTriggered: root.pendingSubtitleSeekTarget = -1
+    }
+
+    Connections {
+        target: root.player.state
+        function onPathChanged() {
+            pendingSubtitleSeekTimer.stop();
+            root.pendingSubtitleSeekTarget = -1;
+            root.pendingSubtitleSeekPath = "";
+        }
+    }
+
+    function seekAdjacentSubtitle(direction) {
+        const state = root.player.state;
+        if (state.sid <= 0) {
+            root.player.controller.showText(qsTr("No primary subtitle track selected"));
+            return;
+        }
+
+        const model = SubtitleLists.primary;
+        if (!model?.fullTimelineReady) {
+            pendingSubtitleSeekTimer.stop();
+            root.pendingSubtitleSeekTarget = -1;
+            root.player.controller.subtitleSeek(direction, true);
+            return;
+        }
+
+        const position = pendingSubtitleSeekTimer.running &&
+            root.pendingSubtitleSeekPath === state.path ?
+            root.pendingSubtitleSeekTarget : state.timePosition;
+        if (!Number.isFinite(position)) return;
+        const target = model.adjacentSubtitleStart(
+            position, direction, state.subtitle.delay);
+        if (target < 0) {
+            root.player.controller.showText(direction < 0 ?
+                qsTr("No previous subtitle") : qsTr("No next subtitle"));
+            return;
+        }
+        root.pendingSubtitleSeekTarget = target;
+        root.pendingSubtitleSeekPath = state.path;
+        pendingSubtitleSeekTimer.restart();
+        root.player.controller.seek(target);
+    }
 
     Settings {
         id: highlightSettings
@@ -129,10 +178,10 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             icon.name: MementoSettings.interfaceSystemIcons ? "media-seek-backward" : null
             icon.source: Utils.toImageProvider("fast-rewind", MementoPalette.text)
-            onClicked: root.player.controller.seekRelative(-5)
+            onClicked: root.seekAdjacentSubtitle(-1)
 
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Back 5 seconds")
+            ToolTip.text: qsTr("Previous subtitle")
         }
 
         ToolButton {
@@ -140,10 +189,10 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             icon.name: MementoSettings.interfaceSystemIcons ? "media-seek-forward" : null
             icon.source: Utils.toImageProvider("fast-forward", MementoPalette.text)
-            onClicked: root.player.controller.seekRelative(5)
+            onClicked: root.seekAdjacentSubtitle(1)
 
             ToolTip.visible: hovered
-            ToolTip.text: qsTr("Forward 5 seconds")
+            ToolTip.text: qsTr("Next subtitle")
         }
 
         ToolButton {

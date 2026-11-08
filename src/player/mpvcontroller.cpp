@@ -626,21 +626,6 @@ void MpvController::seek(double time)
     }
 }
 
-void MpvController::seekRelative(double seconds)
-{
-    QByteArray offset = QString::number(seconds).toUtf8();
-    const char *args[]{
-        "seek",
-        offset,
-        "relative+exact",
-        nullptr
-    };
-    if (::mpv_command_async(handle(), 0, args) < 0)
-    {
-        qWarning("Relative seek failed");
-    }
-}
-
 void MpvController::play()
 {
     int flag = 0;
