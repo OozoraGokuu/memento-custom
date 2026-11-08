@@ -120,6 +120,7 @@ jobs:
             zip
             mingw-w64-ucrt-x86_64-ccache
             mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-ffmpeg
             mingw-w64-ucrt-x86_64-ca-certificates
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-gcc
@@ -171,6 +172,7 @@ jobs:
           objdump -f build/Memento_x86_64/memento.exe |
             grep -Eq 'file format pei-x86-64|architecture: i386:x86-64'
           test -s build/Memento_Windows_x86_64_Installer.exe
+          test -s build/Memento_x86_64/ffmpeg.exe
 
           (
             cd build

@@ -306,25 +306,12 @@ MpvPlayer {
         }
         if (event.modifiers === Qt.NoModifier &&
             (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
-            if (!event.isAutoRepeat) controls.beginSeek(event.key === Qt.Key_Left ? -1 : 1);
+            if (!event.isAutoRepeat)
+                controls.seekAdjacentSubtitle(event.key === Qt.Key_Left ? -1 : 1);
             event.accepted = true;
             return;
         }
         root.controller.sendKeyPress(event.key, event.modifiers);
-    }
-
-    Keys.onReleased: function(event) {
-        if (event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
-            if (!event.isAutoRepeat) controls.endSeek(event.key === Qt.Key_Left ? -1 : 1, false);
-            event.accepted = true;
-        }
-    }
-    onActiveFocusChanged: { if (!activeFocus) controls.resetSeekGesture(); }
-    Connections {
-        target: Qt.application
-        function onStateChanged() {
-            if (Qt.application.state !== Qt.ApplicationActive) controls.resetSeekGesture();
-        }
     }
 
     onCursorPositionChanged: root.mouseMoved(root.cursorPosition.x, root.cursorPosition.y)

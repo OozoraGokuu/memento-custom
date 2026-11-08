@@ -31,7 +31,7 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 - Japanese dictionary lookup, MeCab inflection analysis, Yomitan-format dictionaries and kanji lookup. [Dictionary downloads](docs/DICTIONARIES.md).
 - AnkiConnect card creation with configurable fields and image/audio/video media.
 - Primary and secondary subtitle rendering, subtitle lists and navigation, timing adjustment and auto-pause.
-- Rewind and forward buttons jump to the previous and next primary subtitle cue, accounting for subtitle delay.
+- Rewind and forward buttons step through the ordered primary subtitle lines, accounting for subtitle delay. The line counter starts at the first cue and wraps at either end. Embedded text tracks are indexed when FFmpeg is available.
 - Immersion statistics, AniList title search and episode matching, and a media-library episode picker.
 - On X11, **Subtitle → Include Subtitles in Stream** controls whether text subtitles appear in a capture of Memento's window while they remain visible locally. Screen sharing and bitmap subtitle tracks cannot separate them.
 - Persistent media library for local folders and torrents, episode progress and watched state.

@@ -14,22 +14,28 @@ Rectangle {
     signal copyScreenshotRequested()
 
     readonly property real position: durationSlider.position
-    property real pendingSubtitleSeekTarget: -1
-    property string pendingSubtitleSeekPath: ""
+    // Keep the same zero-based row cursor used by subtitle-list search.
+    property int subtitleLineIndex: -1
+    property var subtitleLineModel: null
 
-    Timer {
-        id: pendingSubtitleSeekTimer
-        interval: 700
-        onTriggered: root.pendingSubtitleSeekTarget = -1
+    function resetSubtitleLine() {
+        subtitleLineIndex = -1;
+        subtitleLineModel = null;
     }
 
     Connections {
         target: root.player.state
-        function onPathChanged() {
-            pendingSubtitleSeekTimer.stop();
-            root.pendingSubtitleSeekTarget = -1;
-            root.pendingSubtitleSeekPath = "";
-        }
+        function onPathChanged() { root.resetSubtitleLine(); }
+    }
+
+    Connections {
+        target: SubtitleLists
+        function onPrimaryChanged() { root.resetSubtitleLine(); }
+    }
+
+    Connections {
+        target: SubtitleLists.primary
+        function onModelReset() { root.resetSubtitleLine(); }
     }
 
     function seekAdjacentSubtitle(direction) {
@@ -41,26 +47,30 @@ Rectangle {
 
         const model = SubtitleLists.primary;
         if (!model?.fullTimelineReady) {
-            pendingSubtitleSeekTimer.stop();
-            root.pendingSubtitleSeekTarget = -1;
-            root.player.controller.subtitleSeek(direction, true);
+            if (model?.loading)
+                root.player.controller.showText(qsTr("Loading subtitle lines"));
+            else
+                root.player.controller.subtitleSeek(direction, true);
             return;
         }
-
-        const position = pendingSubtitleSeekTimer.running &&
-            root.pendingSubtitleSeekPath === state.path ?
-            root.pendingSubtitleSeekTarget : state.timePosition;
-        if (!Number.isFinite(position)) return;
-        const target = model.adjacentSubtitleStart(
-            position, direction, state.subtitle.delay);
-        if (target < 0) {
-            root.player.controller.showText(direction < 0 ?
-                qsTr("No previous subtitle") : qsTr("No next subtitle"));
-            return;
+        const count = model.rowCount();
+        if (count < 1) return;
+        if (root.subtitleLineModel !== model) {
+            root.subtitleLineModel = model;
+            root.subtitleLineIndex = -1;
         }
-        root.pendingSubtitleSeekTarget = target;
-        root.pendingSubtitleSeekPath = state.path;
-        pendingSubtitleSeekTimer.restart();
+        let row = root.subtitleLineIndex + direction;
+        if (root.subtitleLineIndex < 0)
+            row = direction > 0 ? 0 : count - 1;
+        else
+            row = ((row % count) + count) % count;
+        const modelIndex = model.index(row, 0);
+        const start = model.data(modelIndex, SubtitleListModel.StartRole);
+        const target = Math.max(0, start + state.subtitle.delay);
+        if (!Number.isFinite(target)) return;
+        root.subtitleLineIndex = row;
+        model.selectionModel.select(modelIndex, ItemSelectionModel.ClearAndSelect);
+        model.selectionModel.setCurrentIndex(modelIndex, ItemSelectionModel.NoUpdate);
         root.player.controller.seek(target);
     }
 

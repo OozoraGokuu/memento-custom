@@ -21,6 +21,12 @@
 #include "manager/subtitlelistmanager.h"
 
 #include <QPointer>
+#include <QCoreApplication>
+#include <QFileInfo>
+#include <QProcess>
+#include <QTemporaryFile>
+#include <QDir>
+#include <QUrl>
 #include <QtConcurrentRun>
 
 #include <utility>
@@ -143,11 +149,13 @@ void SubtitleListManager::handleSubtitleTracksChanged()
     QHash<int64_t, TrackModel> updatedModels;
     const QList<MpvTrack *> &tracks =
         m_context->player()->state()->subtitleTracks();
+    int embeddedIndex = 0;
     for (const MpvTrack *track : tracks)
     {
         const int64_t id = track->id();
         const QString externalFilename =
             track->external() ? track->externalFilename() : QString();
+        const int streamIndex = track->external() ? -1 : embeddedIndex++;
 
         TrackModel trackModel;
         auto existingIt = m_models.find(id);
@@ -169,6 +177,10 @@ void SubtitleListManager::handleSubtitleTracksChanged()
             {
                 readExternalSubtitles(
                     trackModel.model, trackModel.externalFilename);
+            }
+            else if (!track->isBitmapSubtitle())
+            {
+                readEmbeddedSubtitles(trackModel.model, mediaPath, streamIndex);
             }
         }
         updatedModels.insert(id, std::move(trackModel));
@@ -371,4 +383,69 @@ QCoro::Task<void> SubtitleListManager::readExternalSubtitles(
             context->player()->state()->timePosition()
         );
     }
+}
+
+QCoro::Task<void> SubtitleListManager::readEmbeddedSubtitles(
+    QPointer<SubtitleListModel> model, QString mediaPath, int streamIndex)
+{
+    const QPointer<SubtitleListManager> manager(this);
+    const QPointer<Context> contextGuard(m_context);
+    if (model) model->setLoading(true);
+    if (!model || !manager || !contextGuard) co_return;
+
+    QFuture<std::vector<SubtitleEntry>> future = QtConcurrent::run(
+        [mediaPath = std::move(mediaPath), streamIndex] {
+            const QUrl url(mediaPath);
+            const QString localPath = url.isLocalFile() ?
+                url.toLocalFile() : mediaPath;
+            if (streamIndex < 0 || !QFileInfo(localPath).isFile())
+                return std::vector<SubtitleEntry>{};
+
+            QTemporaryFile subtitleFile(
+                QDir::tempPath() + "/memento-subtitles-XXXXXX.srt");
+            if (!subtitleFile.open()) return std::vector<SubtitleEntry>{};
+            const QString outputPath = subtitleFile.fileName();
+            subtitleFile.close();
+
+            QProcess ffmpeg;
+#ifdef Q_OS_WIN
+            const QString ffmpegProgram = QDir(
+                QCoreApplication::applicationDirPath()).filePath("ffmpeg.exe");
+#else
+            const QString ffmpegProgram = "ffmpeg";
+#endif
+            ffmpeg.start(ffmpegProgram, {
+                "-nostdin", "-v", "error", "-y", "-i", localPath,
+                "-map", QString("0:s:%1").arg(streamIndex),
+                "-c:s", "srt", "-f", "srt", outputPath
+            });
+            if (!ffmpeg.waitForStarted(5000))
+                return std::vector<SubtitleEntry>{};
+            if (!ffmpeg.waitForFinished(60000))
+            {
+                ffmpeg.kill();
+                ffmpeg.waitForFinished();
+                return std::vector<SubtitleEntry>{};
+            }
+            if (ffmpeg.exitStatus() != QProcess::NormalExit ||
+                ffmpeg.exitCode() != 0)
+                return std::vector<SubtitleEntry>{};
+            return SubtitleParser().parseSubtitles(outputPath);
+        }
+    );
+
+    std::vector<SubtitleEntry> items = co_await qCoro(future).takeResult();
+    if (model) model->setLoading(false);
+    if (items.empty() || !model || !manager || !contextGuard) co_return;
+    model->setItems(std::move(items));
+    if (!model || !manager || !contextGuard || !contextGuard->player())
+        co_return;
+    Context *context = contextGuard.data();
+    if (model == context->subtitleLists()->primary())
+        manager->selectPosition(model, context->player()->state()->subtitle(),
+                                context->player()->state()->timePosition());
+    else if (model == context->subtitleLists()->secondary())
+        manager->selectPosition(
+            model, context->player()->state()->secondarySubtitle(),
+            context->player()->state()->timePosition());
 }

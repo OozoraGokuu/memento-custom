@@ -146,6 +146,11 @@ private slots:
     QCoro::Task<void> readExternalSubtitles(
         QPointer<SubtitleListModel> model, QString path);
 
+    /** Populate an embedded text track from its ordered subtitle stream. */
+    QCoro::Task<void> readEmbeddedSubtitles(
+        QPointer<SubtitleListModel> model, QString mediaPath,
+        int streamIndex);
+
 private:
     /**
      * @brief A subtitle model and the track identity needed to reuse it safely.

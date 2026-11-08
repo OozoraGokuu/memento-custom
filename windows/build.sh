@@ -30,6 +30,7 @@ else
     exit 1
 fi
 cp "$MEMENTO_EXE" Memento_$ARCH/memento.exe
+cp "$PREFIX/bin/ffmpeg.exe" Memento_$ARCH/ffmpeg.exe
 cp ../LICENSE Memento_$ARCH/LICENSE.txt
 cp ../README.md ../RELEASE_NOTES.md Memento_$ARCH/
 cp -r ../docs Memento_$ARCH/
@@ -55,6 +56,10 @@ MINGW_BUNDLEDLLS_SEARCH_PATH="$(cygpath -w "$PREFIX/bin")" \
     python3 ../windows/mingw-bundledlls.py \
     --copy \
     ./Memento_$ARCH/memento.exe
+MINGW_BUNDLEDLLS_SEARCH_PATH="$(cygpath -w "$PREFIX/bin")" \
+    python3 ../windows/mingw-bundledlls.py \
+    --copy \
+    ./Memento_$ARCH/ffmpeg.exe
 cp "$PREFIX"/bin/libssl-*.dll ./Memento_$ARCH
 cp "$PREFIX/etc/ssl/certs/ca-bundle.crt" ./Memento_$ARCH/cacert.pem
 mkdir -p ./Memento_$ARCH/licenses
