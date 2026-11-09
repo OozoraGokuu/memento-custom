@@ -8,6 +8,7 @@ The Windows CI job compiles native x86_64 binaries with warnings treated as erro
 | Auto-pause | Player-manager state transition tests |
 | Dictionaries | Synthetic Yomitan import and lookup, queued imports, duplicate-default detection, local HTTP download/import, cancellation and invalid archives; Japanese/Arabic paths. Real Jitendex/JPDB archives additionally imported and queried on Linux. |
 | AnkiConnect | Real local HTTP connection, API key, deck/field lookup, Japanese note submission and server errors against a fake Anki service |
+| Anki sentence video | Real optional video note payload, five-second timing and file-boundary guards; portable-package H.264/AAC MP4 creation, fast-start metadata, target-field validation, Unicode paths, and five seconds of decoded, non-silent audio |
 | Jimaku | Matching and archive handling with synthetic fixtures |
 | AJATT mirror | Catalog/cache/download logic tests |
 | Torrent RSS search | User-configured URLs, same-origin RSS discovery and torrent links, request parameter preservation, RSS parsing, sorting and DNS fallback transport tests |
@@ -25,6 +26,6 @@ Before relying on a new machine, play a local file, verify picture and sound, lo
 
 ## macOS
 
-The macOS workflow tests Apple Silicon and Intel separately on macOS 15 runners. Publication requires CTest, source/package privacy audits, extracted-ZIP startup, complete bundled library checks, architecture and deployment-target checks, ad-hoc signature verification, and real subtitle/image/audio export to pass. The extracted package media test removes Qt and dynamic-library search variables and uses a system-only executable PATH.
+The macOS workflow tests Apple Silicon and Intel separately on macOS 15 runners on pushes, pull requests and manual runs. Publication requires CTest, source/package privacy audits, extracted-ZIP startup, complete bundled library checks, architecture and deployment-target checks, ad-hoc signature verification, and real subtitle/image/audio/Anki-video export to pass. The extracted package media test removes Qt and dynamic-library search variables and uses a system-only executable PATH. It exercises the deployed encoder and decoder without relying on an externally installed FFmpeg executable.
 
 This does not establish compatibility with every physical Mac, display, audio device, or live account. Gatekeeper notarization is not provided by these ad-hoc signed builds.

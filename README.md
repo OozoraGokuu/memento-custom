@@ -3,10 +3,12 @@
 Vibecoded, added lots of QoL changes that i believed should've been in memento.
 # Memento Custom
 
-An unofficial Windows, Linux and macOS build of [Memento](https://github.com/ripose-jp/Memento), an mpv-based Japanese study player. GPL-2.0; original project and dependency attribution are retained.
+An unofficial fork of [Memento](https://github.com/ripose-jp/Memento), an mpv-based Japanese study player, with Windows, Linux and macOS builds. GPL-2.0; original project and dependency attribution are retained.
 
 
 [Downloads](https://github.com/OozoraGokuu/memento-custom/releases) · [Build and test results](https://github.com/OozoraGokuu/memento-custom/actions) · [Validation coverage](docs/VALIDATION.md)
+
+Earlier packages remain in the [previous repository's release archive](https://github.com/OozoraGokuu/memento-custom-archive/releases). New work is published in this fork; updating source on GitHub does not update an existing installation.
 
 ## Install
 
@@ -30,6 +32,7 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 - Default **Jitendex** definitions and **JPDB** word-frequency dictionaries download automatically on a fresh profile. Install/retry them from Options → Dictionaries; existing dictionaries are preserved.
 - Japanese dictionary lookup, MeCab inflection analysis, Yomitan-format dictionaries and kanji lookup. [Dictionary downloads](docs/DICTIONARIES.md).
 - AnkiConnect card creation with configurable fields and image/audio/video media.
+- **Add video** when adding a word to Anki attaches a five-second MP4 from that word's subtitle sentence to a field you choose. It starts at the sentence's playback time; near the end of a file, it shifts back to keep five seconds, and files shorter than five seconds use their available length. Clips include the selected audio track and use H.264/AAC for playback on Windows, Linux and macOS. The ordinary Add word action keeps your existing field and media settings.
 - Primary and secondary subtitle rendering, subtitle lists and navigation, timing adjustment and auto-pause.
 - Rewind and forward buttons step through the ordered primary subtitle lines, accounting for subtitle delay. The visible counter starts at 1 on the first cue, advances during playback, and resynchronizes after seeking. Buttons wrap at either end. Embedded text tracks are indexed when FFmpeg is available.
 - **Ctrl+Z** saves a subtitle screenshot as a PNG in **Pictures/Memento/<library title>/** with the episode name and playback time. Videos outside the library use **Unsorted**. Text fields retain their normal Undo shortcut.
@@ -58,7 +61,7 @@ Every new installation starts without accounts, API keys, watch history, persona
 - **Jimaku:** enter your own key in Options → Jimaku Subtitles.
 - **AniList:** create your own application in AniList Developer Settings. Set its redirect URL to `http://127.0.0.1:47832/callback`, enter the Client ID in Options → AniList Integration, then connect. No client secret is needed. Link each library title and check its episode numbering before enabling automatic progress updates. Plain numbered filenames are detected using neighboring episodes in the same folder or torrent. Ambiguous or out-of-range numbers require confirmation. Manual episode corrections are saved per file and linked season; use Detect automatically to clear a correction.
 - **Migaku:** Options → Migaku Integration → enable integration and choose an output folder. Pause on a subtitle and press **Ctrl+Shift+M**, or use the export action. Add the resulting JPG under Images and MP3 under Sentence audio in Migaku's Card Creator.
-- **Anki:** install AnkiConnect in your own Anki profile, then configure Memento's Anki options.
+- **Anki:** install AnkiConnect in your own Anki profile, then configure Memento's Anki options. For **Add video**, choose a field included in your Anki card template (for example, a `Video` field displayed with `{{Video}}`). AnkiConnect stores the MP4 in Anki's media collection; Memento's bundled encoder creates it without a separate FFmpeg installation.
 
 ## Building
 
@@ -76,4 +79,4 @@ Windows bundles dependency licenses and a `package-versions.txt` inventory. Depe
 
 ## macOS builds
 
-The [macOS workflow](.github/workflows/macos.yml) builds each architecture natively with Qt 6.9 and a pinned MacPorts dependency tree. It runs CTest and checks the extracted app's dependencies, signature, minimum OS version, startup, subtitle capture, clipboard, and JPG/MP3 export. Dependency notices and the package inventory are included in `Memento.app/Contents/Resources/licenses`. See the workflow result for the tested commit; a running build is not a verified release.
+The [macOS workflow](.github/workflows/macos.yml) builds each architecture natively with Qt 6.9 and a pinned MacPorts dependency tree. It runs on pushes and pull requests, as well as manually. It runs CTest and checks the extracted app's dependencies, signature, minimum OS version, startup, subtitle capture, clipboard, JPG/MP3 export, and five-second Anki MP4 creation and audio decoding. Dependency notices and the package inventory are included in `Memento.app/Contents/Resources/licenses`. See the workflow result for the tested commit; a running build is not a verified release.

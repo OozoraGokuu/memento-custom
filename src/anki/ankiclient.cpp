@@ -24,7 +24,9 @@
 #include <QDebug>
 #include <QGuiApplication>
 #include <QNetworkReply>
+#include <QPointer>
 #include <QtConcurrent>
+#include <QUuid>
 
 #ifdef MEMENTO_SYSTEM_QCORO
 #include <QCoroFuture>
@@ -347,6 +349,79 @@ QCoro::Task<QVariantMap> AnkiClient::noteAddableAsync(const Kanji *kanji)
     co_return result;
 }
 
+QVariantMap AnkiClient::prepareVideoNote(const Term *term)
+{
+    m_videoNoteDraft.reset();
+    const auto failure = [](const QString &error) {
+        return QVariantMap{{"success", false}, {"error", error}};
+    };
+    if (!term || !profile() || !m_context->player())
+        return failure(tr("Open a video and select an Anki profile before adding a sentence clip."));
+    auto draft = std::make_unique<VideoNoteDraft>();
+    draft->media = Anki::Note::captureMedia(*m_context);
+    if (draft->media.primaryText.trimmed().isEmpty())
+        return failure(tr("Pause on the subtitle sentence you want to add, then choose Add video."));
+    // The draft owns its clones independently of the client's QObject tree.
+    // Encoding may still be running when the window/client is destroyed.
+    draft->profile.reset(profile()->clone());
+    draft->term.reset(term->clone());
+    populate(draft->term.get(), &draft->media);
+    const auto interval = Anki::Note::videoInterval(draft->media,
+        draft->term->startTime(), draft->term->endTime());
+    if (!interval.error.isEmpty()) return failure(interval.error);
+    QStringList fields;
+    QString preferred;
+    for (const auto &field : draft->profile->termFields()->items())
+    {
+        fields.append(field.name);
+        if (field.value.contains("{video")) preferred = field.name;
+    }
+    if (fields.isEmpty()) return failure(tr("Configure the Anki note fields before adding a video."));
+    if (preferred.isEmpty())
+        for (const auto &name : {QStringLiteral("Video"), QStringLiteral("Sentence"),
+                               QStringLiteral("Audio"), QStringLiteral("Back")})
+            for (const auto &field : fields)
+                if (preferred.isEmpty() && field.compare(name, Qt::CaseInsensitive) == 0) preferred = field;
+    if (preferred.isEmpty()) preferred = fields.last();
+    draft->token = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QVariantMap result{{"success", true}, {"token", draft->token}, {"fields", fields},
+        {"preferredField", preferred}, {"sentence", draft->media.primaryText},
+        {"start", interval.start}, {"end", interval.end}, {"title", draft->media.title}};
+    m_videoNoteDraft = std::move(draft);
+    return result;
+}
+
+void AnkiClient::cancelVideoNote(const QString &token)
+{
+    if (m_videoNoteDraft && m_videoNoteDraft->token == token) m_videoNoteDraft.reset();
+}
+
+QCoro::QmlTask AnkiClient::addVideoNote(const QString &token, const QString &field)
+{
+    return addVideoNoteAsync(token, field);
+}
+
+QCoro::Task<QVariantMap> AnkiClient::addVideoNoteAsync(const QString &token, const QString &field)
+{
+    if (!m_videoNoteDraft || m_videoNoteDraft->token != token)
+        co_return QVariantMap{{"success", false}, {"error", tr("This sentence clip has expired. Choose Add video again.")}};
+    auto draft = std::shared_ptr<VideoNoteDraft>(std::move(m_videoNoteDraft));
+    bool validField = false;
+    for (const auto &candidate : draft->profile->termFields()->items())
+        if (candidate.name == field) validField = true;
+    if (!validField)
+        co_return QVariantMap{{"success", false}, {"error", tr("Choose an existing note field for the video.")}};
+    const QPointer<AnkiClient> client(this);
+    Anki::Note::Context ctx = co_await QtConcurrent::run([draft, field] {
+        return Anki::Note::build(*draft->profile, *draft->term, true, draft->media,
+            Anki::Note::VideoAttachment{true, field});
+    });
+    if (!client)
+        co_return QVariantMap{{"success", false},
+            {"error", tr("The Anki client closed before the sentence video was ready.")}};
+    co_return co_await client->addNoteHelper(draft->profile.get(), std::move(ctx));
+}
+
 QCoro::QmlTask AnkiClient::addNote(const Term *term)
 {
     return addNoteAsync(term);
@@ -412,6 +487,8 @@ QCoro::Task<QVariantMap> AnkiClient::addNoteAsync(const Kanji *kanji)
 QCoro::Task<QVariantMap> AnkiClient::addNoteHelper(
     const AnkiProfile *profile, Anki::Note::Context &&ctx)
 {
+    if (!ctx.error.isEmpty())
+        co_return QVariantMap{{"success", false}, {"error", ctx.error}};
     if (!ctx.fileMap.isEmpty())
     {
         QVariantMap addMediaResult =

@@ -95,6 +95,9 @@ struct VideoParams
 
     /* The decibels to normalize the audio to */
     double db = -20.0;
+
+    /* A per-note attachment uses exactly five seconds, without audio padding. */
+    bool sentenceClip = false;
 };
 
 /**
@@ -249,7 +252,8 @@ inline bool operator==(const VideoParams &lhs, const VideoParams &rhs)
         lhs.audio == rhs.audio &&
         lhs.subtitles == rhs.subtitles &&
         lhs.normalize == rhs.normalize &&
-        lhs.db == rhs.db;
+        lhs.db == rhs.db &&
+        lhs.sentenceClip == rhs.sentenceClip;
 }
 
 /**
@@ -266,7 +270,8 @@ inline size_t qHash(const VideoParams &key, size_t seed)
         qHash(key.audio, seed) *
         qHash(key.subtitles, seed) *
         qHash(key.normalize, seed) *
-        qHash(key.db, seed);
+        qHash(key.db, seed) *
+        qHash(key.sentenceClip, seed);
 }
 
 /* End ScreenshotParams Operators */
@@ -887,6 +892,21 @@ static bool createVideoHelper(
     args.db = params.db;
     args.subtitles = params.subtitles;
 
+    if (params.sentenceClip)
+    {
+        // Keep a full five seconds near EOF by moving the start back. Sources
+        // shorter than five seconds contribute their complete available span.
+        const auto interval = Anki::Note::videoInterval(
+            mediaSnapshot, exp.startTime(), exp.endTime());
+        if (!interval.error.isEmpty())
+        {
+            ctx.error = interval.error;
+            return false;
+        }
+        args.start = interval.start;
+        args.end = interval.end;
+    }
+
     if (args.start >= args.end)
     {
         return false;
@@ -951,12 +971,32 @@ static bool createVideoHelper(
         }
     }
 
+    MpvVideoExportOptions exportOptions;
+    if (params.sentenceClip)
+    {
+        // H.264/AAC in yuv420p MP4 also works in Anki's Windows/macOS players.
+        // Cap resolution to keep a five-second card attachment reasonably small.
+        const double scale = std::min({1.0,
+            1280.0 / mediaSnapshot.videoWidth,
+            720.0 / mediaSnapshot.videoHeight});
+        exportOptions.width = std::max(2,
+            static_cast<int>(mediaSnapshot.videoWidth * scale) / 2 * 2);
+        exportOptions.height = std::max(2,
+            static_cast<int>(mediaSnapshot.videoHeight * scale) / 2 * 2);
+        exportOptions.videoKbps = 1500;
+        exportOptions.audioKbps = 128;
+        exportOptions.externalAudio = mediaSnapshot.externalAudio;
+        exportOptions.start = args.start;
+        exportOptions.end = args.end;
+        exportOptions.control = std::make_shared<MpvEncodingControl>();
+    }
     QString path = MpvController::encodeVideoClip(
         mediaSnapshot.encoding,
         args,
         subtitlePath,
         nativePrimary,
-        nativeSecondary
+        nativeSecondary,
+        params.sentenceClip ? &exportOptions : nullptr
     );
     if (!subtitlePath.isEmpty())
     {
@@ -964,12 +1004,27 @@ static bool createVideoHelper(
     }
     if (path.isEmpty())
     {
+        if (params.sentenceClip)
+        {
+            ctx.error = QObject::tr(
+                "Could not create the sentence video. Check that the source "
+                "file is available and the selected section is downloaded.");
+        }
         return false;
     }
 
     QJsonObject vidObj;
-    vidObj[AnkiConnect::Note::DATA] = FileUtils::toBase64(path);
-    QString filename = FileUtils::calculateMd5(path) + ".mp4";
+    const QString data = FileUtils::toBase64(path);
+    const QString hash = FileUtils::calculateMd5(path);
+    if (data.isEmpty() || hash.isEmpty())
+    {
+        QFile::remove(path);
+        if (params.sentenceClip)
+            ctx.error = QObject::tr("Could not read the sentence video attachment.");
+        return false;
+    }
+    vidObj[AnkiConnect::Note::DATA] = data;
+    QString filename = hash + ".mp4";
     vidObj[AnkiConnect::Note::FILENAME] = filename;
     vidObj[AnkiConnect::Note::FIELDS] = fields;
 
@@ -2540,8 +2595,74 @@ static bool createVideo(
     return success;
 }
 
+/** Validate the explicit attachment before creating any note media. */
+static bool prepareVideoAttachment(
+    const AnkiProfile &profile,
+    const Expression &expression,
+    const Anki::Note::MediaSnapshot &snapshot,
+    const Anki::Note::VideoAttachment &video,
+    bool media,
+    FieldContext &fieldCtx,
+    Anki::Note::Context &ctx)
+{
+    if (!video.enabled)
+        return true;
+
+    if (!media || video.field.isEmpty() ||
+        !ctx.ankiObject[AnkiConnect::Note::FIELDS].toObject().contains(video.field))
+    {
+        ctx.error = QObject::tr("Choose an existing Anki field for the video.");
+        return false;
+    }
+    if (expression.subtitle().trimmed().isEmpty())
+    {
+        ctx.error = QObject::tr("Select a subtitle sentence with valid timing before adding a video.");
+        return false;
+    }
+    const auto interval = Anki::Note::videoInterval(
+        snapshot, expression.startTime(), expression.endTime());
+    if (!interval.error.isEmpty())
+    {
+        ctx.error = interval.error;
+        return false;
+    }
+
+    // An explicit attachment replaces marker videos for this note. Otherwise a
+    // field configured with {video} could receive both full-sentence and 5s clips.
+    VideoParams params;
+    params.sentenceClip = true;
+    params.audio = snapshot.encoding.aid > 0;
+    params.normalize = profile.audioNormalize();
+    params.db = profile.audioDb();
+    fieldCtx.fieldsWithVideo.clear();
+    fieldCtx.fieldsWithVideo[params] = QJsonArray{video.field};
+    return true;
+}
+
 /* End Media Functions */
 /* Begin Public Functions */
+
+Anki::Note::VideoInterval Anki::Note::videoInterval(
+    const MediaSnapshot &snapshot, double sentenceStart, double sentenceEnd)
+{
+    if (snapshot.encoding.input.isEmpty() || snapshot.encoding.vid <= 0 ||
+        snapshot.videoWidth <= 0 || snapshot.videoHeight <= 0 ||
+        !std::isfinite(snapshot.duration) || snapshot.duration <= 0.0)
+    {
+        return {0, 0, QObject::tr(
+            "Load a video with a known duration before adding a sentence video.")};
+    }
+    if (!std::isfinite(sentenceStart) || !std::isfinite(sentenceEnd) ||
+        sentenceEnd <= sentenceStart || sentenceEnd <= 0.0 ||
+        sentenceStart >= snapshot.duration)
+    {
+        return {0, 0, QObject::tr(
+            "Select a subtitle sentence with valid timing before adding a video.")};
+    }
+    const double start = std::clamp(sentenceStart, 0.0,
+        std::max(0.0, snapshot.duration - 5.0));
+    return {start, std::min(start + 5.0, snapshot.duration), {}};
+}
 
 Anki::Note::MediaSnapshot Anki::Note::captureMedia(
     const ::Context &appContext)
@@ -2564,6 +2685,18 @@ Anki::Note::MediaSnapshot Anki::Note::captureMedia(
 
     MpvState *state = player->state();
     snapshot.encoding = controller->encodingContext();
+    for (const MpvTrack *track : state->audioTracks())
+    {
+        if (track != nullptr && track->id() == snapshot.encoding.aid && track->external())
+        {
+            snapshot.externalAudio.id = track->id();
+            snapshot.externalAudio.sourceId = track->sourceId();
+            snapshot.externalAudio.externalFilename = track->externalFilename();
+            snapshot.externalAudio.codec = track->codec();
+            snapshot.externalAudio.external = true;
+            break;
+        }
+    }
     snapshot.subtitleStyle.font = settings->interfaceSubtitleFont();
     snapshot.subtitleStyle.textColor = settings->interfaceSubtitleColor();
     snapshot.subtitleStyle.backgroundColor =
@@ -2639,6 +2772,7 @@ Anki::Note::MediaSnapshot Anki::Note::captureMedia(
     snapshot.stateCaptured = capture.stateCaptured;
     snapshot.position = capture.stateCaptured ?
         capture.position : state->timePosition();
+    snapshot.duration = state->duration();
     snapshot.title = state->title();
 
     struct ActiveCue
@@ -2710,7 +2844,8 @@ Anki::Note::Context Anki::Note::build(
     const AnkiProfile &profile,
     const Term &term,
     bool media,
-    const MediaSnapshot &mediaSnapshot)
+    const MediaSnapshot &mediaSnapshot,
+    const VideoAttachment &video)
 {
     Anki::Note::Context ctx;
     ctx.setDeck(profile.termDeck());
@@ -2768,13 +2903,21 @@ Anki::Note::Context Anki::Note::build(
     }
     ctx.setFields(fieldsObj);
 
+    if (!prepareVideoAttachment(profile, term, mediaSnapshot, video, media, fieldCtx, ctx))
+        return ctx;
+
     if (media)
     {
         createAudio(term, fieldCtx, ctx);
         createAudioMedia(mediaSnapshot, profile, term, fieldCtx, ctx);
         createScreenshot(mediaSnapshot, profile, fieldCtx, ctx);
         createScreenshotVideo(mediaSnapshot, profile, fieldCtx, ctx);
-        createVideo(mediaSnapshot, profile, term, fieldCtx, ctx);
+        if (!createVideo(mediaSnapshot, profile, term, fieldCtx, ctx) && video.enabled)
+        {
+            if (ctx.error.isEmpty())
+                ctx.error = QObject::tr("Could not create the sentence video attachment.");
+            return ctx;
+        }
 
         ctx.fileMap.reserve(fieldCtx.files.size());
         for (const GlossaryBuilder::FileInfo &fileInfo : fieldCtx.files)
@@ -2790,7 +2933,8 @@ Anki::Note::Context Anki::Note::build(
     const AnkiProfile &profile,
     const Kanji &kanji,
     bool media,
-    const MediaSnapshot &mediaSnapshot)
+    const MediaSnapshot &mediaSnapshot,
+    const VideoAttachment &video)
 {
     Anki::Note::Context ctx;
     ctx.setDeck(profile.kanjiDeck());
@@ -2846,12 +2990,20 @@ Anki::Note::Context Anki::Note::build(
     }
     ctx.setFields(fieldsObj);
 
+    if (!prepareVideoAttachment(profile, kanji, mediaSnapshot, video, media, fieldCtx, ctx))
+        return ctx;
+
     if (media)
     {
         createAudioMedia(mediaSnapshot, profile, kanji, fieldCtx, ctx);
         createScreenshot(mediaSnapshot, profile, fieldCtx, ctx);
         createScreenshotVideo(mediaSnapshot, profile, fieldCtx, ctx);
-        createVideo(mediaSnapshot, profile, kanji, fieldCtx, ctx);
+        if (!createVideo(mediaSnapshot, profile, kanji, fieldCtx, ctx) && video.enabled)
+        {
+            if (ctx.error.isEmpty())
+                ctx.error = QObject::tr("Could not create the sentence video attachment.");
+            return ctx;
+        }
 
         ctx.fileMap.reserve(fieldCtx.files.size());
         for (const GlossaryBuilder::FileInfo &fileInfo : fieldCtx.files)

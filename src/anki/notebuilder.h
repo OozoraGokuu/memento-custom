@@ -82,6 +82,16 @@ struct Context
 
     /* A mapping of file to filenames */
     QList<GlossaryBuilder::FileInfo> fileMap;
+
+    /* A requested attachment failed. The caller must not submit this note. */
+    QString error;
+};
+
+/** A per-note five-second sentence video, appended to an existing note field. */
+struct VideoAttachment
+{
+    bool enabled{false};
+    QString field;
 };
 
 /**
@@ -93,6 +103,7 @@ struct Context
 struct MediaSnapshot
 {
     MpvEncodingContext encoding;
+    MpvEncodingContext::SubtitleTrack externalAudio;
     QImage screenshotFrame;
     QImage videoFrame;
     SubtitleMedia::Style subtitleStyle;
@@ -102,6 +113,7 @@ struct MediaSnapshot
     QString primaryText;
     QString secondaryText;
     double position{0.0};
+    double duration{0.0};
     double primaryStart{0.0};
     double primaryEnd{0.0};
     double secondaryStart{0.0};
@@ -114,6 +126,17 @@ struct MediaSnapshot
     bool completePrimaryTimeline{false};
     bool completeSecondaryTimeline{false};
 };
+
+struct VideoInterval
+{
+    double start{0.0};
+    double end{0.0};
+    QString error;
+};
+
+/** The five-second range shown in the dialog and used by the encoder. */
+[[nodiscard]] VideoInterval videoInterval(
+    const MediaSnapshot &snapshot, double sentenceStart, double sentenceEnd);
 
 /**
  * @brief Capture player media and native subtitle state on the owning thread.
@@ -129,6 +152,7 @@ struct MediaSnapshot
  * @param media true if screenshots and audio should be included in the object,
  * false otherwise.
  * @param mediaSnapshot Immutable player data captured before worker execution.
+ * @param video An optional five-second sentence clip and its destination field.
  * @return A Context containing an Anki compatible JSON object.
  */
 [[nodiscard]]
@@ -136,7 +160,8 @@ Anki::Note::Context build(
     const AnkiProfile &profile,
     const Term &term,
     bool media,
-    const MediaSnapshot &mediaSnapshot = {});
+    const MediaSnapshot &mediaSnapshot = {},
+    const VideoAttachment &video = {});
 
 /**
  * @brief Create an AnkiConnect compatible note JSON object with corresponding
@@ -147,6 +172,7 @@ Anki::Note::Context build(
  * @param media true if screenshots and audio should be included in the object,
  * false otherwise.
  * @param mediaSnapshot Immutable player data captured before worker execution.
+ * @param video An optional five-second sentence clip and its destination field.
  * @return A Context containing an Anki compatible JSON object.
  */
 [[nodiscard]]
@@ -154,6 +180,7 @@ Anki::Note::Context build(
     const AnkiProfile &profile,
     const Kanji &kanji,
     bool media,
-    const MediaSnapshot &mediaSnapshot = {});
+    const MediaSnapshot &mediaSnapshot = {},
+    const VideoAttachment &video = {});
 }
 }

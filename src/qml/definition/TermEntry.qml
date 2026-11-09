@@ -114,6 +114,118 @@ Item {
         });
     }
 
+    property var videoDraft: ({})
+    property Term videoDraftTerm: null
+    Component.onDestruction: {
+        if (root.videoDraft.token) AnkiClient.cancelVideoNote(root.videoDraft.token);
+    }
+
+    function prepareVideo() {
+        if (!root.term || root.term.ankiAdding) return;
+        let selection = [];
+        for (let i = 0; i < glossaryRepeater.count; ++i) {
+            const item = glossaryRepeater.itemAt(i);
+            if (item && item.selectedText.length > 0) selection.push(item.selectedText);
+        }
+        root.term.selection = selection;
+        if (audioFiles.files.count > 0) {
+            const audio = audioFiles.files.get(0);
+            if (audio.exists) {
+                root.term.audioSourceName = audio.name;
+                root.term.audioUrl = audio.url;
+                root.term.audioSkipHash = audio.skipHash;
+            }
+        }
+        const result = AnkiClient.prepareVideoNote(root.term);
+        if (!result.success) {
+            errorDialog.title = qsTr("Cannot add sentence video");
+            errorLabel.text = result.error;
+            errorDialog.open();
+            return;
+        }
+        root.videoDraftTerm = root.term;
+        root.videoDraft = result;
+        videoField.currentIndex = result.fields.indexOf(result.preferredField);
+        videoDialog.open();
+    }
+
+    function submitVideo() {
+        if (!root.videoDraft.token) return;
+        const addingTerm = root.videoDraftTerm;
+        const token = root.videoDraft.token;
+        const field = videoField.currentText;
+        const reading = addingTerm ? addingTerm.readingAsExpression : false;
+        root.videoDraft = ({});
+        videoDialog.close();
+        if (addingTerm) addingTerm.ankiAdding = true;
+        AnkiClient.addVideoNote(token, field).then(function(result) {
+            if (addingTerm) addingTerm.ankiAdding = false;
+            if (!result.success) {
+                errorDialog.title = qsTr("Error Adding Anki Note");
+                errorLabel.text = result.error;
+                errorDialog.open();
+                return;
+            }
+            if (addingTerm) {
+                if (reading) addingTerm.addableReading = false;
+                else addingTerm.addableExpression = false;
+                addingTerm.readingAsExpression = !reading;
+            }
+        });
+    }
+
+    Dialog {
+        id: videoDialog
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: Math.min(520, parent ? parent.width - 32 : 520)
+        title: qsTr("Add word with sentence video")
+        modal: true
+        standardButtons: Dialog.Cancel
+        onClosed: {
+            if (root.videoDraft.token) AnkiClient.cancelVideoNote(root.videoDraft.token);
+            root.videoDraft = ({});
+            root.videoDraftTerm = null;
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: root.videoDraft.sentence || ""
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                font.bold: true
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("%1 – %2 · %3 seconds")
+                    .arg(Utils.toTimeString(root.videoDraft.start || 0))
+                    .arg(Utils.toTimeString(root.videoDraft.end || 0))
+                    .arg(((root.videoDraft.end || 0) - (root.videoDraft.start || 0)).toFixed(1))
+                wrapMode: Text.Wrap
+            }
+            Label { text: qsTr("Add video to note field") }
+            ComboBox {
+                id: videoField
+                Layout.fillWidth: true
+                model: root.videoDraft.fields || []
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Adds this word with an MP4 clip (up to 720p), the selected audio track and selected subtitle tracks. The clip starts at the sentence; near the end it shifts earlier to keep five seconds. Videos shorter than five seconds use their available duration. Include this field in your Anki card template to play the clip.")
+                wrapMode: Text.Wrap
+                color: MementoPalette.placeholderText
+            }
+            Button {
+                objectName: "confirmAnkiVideoButton"
+                Layout.alignment: Qt.AlignRight
+                text: qsTr("Add to Anki with video")
+                enabled: !!root.videoDraft.token && videoField.currentIndex >= 0
+                onClicked: root.submitVideo()
+            }
+        }
+    }
+
     /**
      * Save the current screenshot and sentence audio to the chosen folder.
      */
@@ -340,6 +452,17 @@ Item {
                                 onObjectRemoved: (index, object) => addAnkiMenu.removeItem(object)
                             }
                         }
+                    }
+
+                    ToolButton {
+                        objectName: "addAnkiVideoButton"
+                        visible: addAnkiButton.visible
+                        enabled: addAnkiButton.enabled
+                        focusPolicy: Qt.NoFocus
+                        text: root.term?.ankiAdding ? qsTr("Adding…") : qsTr("Add video")
+                        onClicked: root.prepareVideo()
+                        ToolTip.visible: hovered
+                        ToolTip.text: qsTr("Add this word to Anki with a five-second sentence clip")
                     }
 
                     ToolButton {

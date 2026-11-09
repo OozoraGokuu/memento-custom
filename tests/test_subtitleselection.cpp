@@ -162,6 +162,9 @@ private slots:
         QFile json(QDir(DirectoryUtils::getConfigDir()).filePath("episode-library.json"));
         QVERIFY(json.open(QIODevice::ReadOnly));
         const auto data = json.readAll();
+        // Windows cannot atomically replace the library while this reader is
+        // open. Finish the inspection before exercising another saved choice.
+        json.close();
         QVERIFY(!data.contains("test-only-value"));
         QVERIFY(!data.contains("example.invalid"));
         choice.insert("cachePath", "https://example.invalid/file?authorization=test-only");

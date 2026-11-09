@@ -220,6 +220,12 @@ public:
     [[nodiscard]]
     Q_INVOKABLE QCoro::QmlTask addNote(const Term *term);
 
+    /** Freeze the sentence, media and note profile while the video dialog is open. */
+    Q_INVOKABLE QVariantMap prepareVideoNote(const Term *term);
+    Q_INVOKABLE void cancelVideoNote(const QString &token);
+    Q_INVOKABLE QCoro::QmlTask addVideoNote(const QString &token, const QString &field);
+    QCoro::Task<QVariantMap> addVideoNoteAsync(const QString &token, const QString &field);
+
     /**
      * @brief Add a term note to Anki.
      *
@@ -493,6 +499,15 @@ private:
     void populate(
         Expression *expression,
         const Anki::Note::MediaSnapshot *mediaSnapshot = nullptr) const;
+
+    struct VideoNoteDraft
+    {
+        QString token;
+        std::unique_ptr<AnkiProfile> profile;
+        std::unique_ptr<Term> term;
+        Anki::Note::MediaSnapshot media;
+    };
+    std::unique_ptr<VideoNoteDraft> m_videoNoteDraft;
 
     /* The application context */
     const Context *m_context{nullptr};

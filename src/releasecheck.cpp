@@ -1,6 +1,7 @@
 #include "releasecheck.h"
 #include "state/context.h"
 #include "player/mpvplayer.h"
+#include "anki/notebuilder.h"
 #include "torrentsearch/torrentsearchnetworkreply.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -23,6 +24,57 @@ void fail(const QString &message)
 {
     qCritical().noquote() << "Release check:" << message;
     QCoreApplication::exit(1);
+}
+
+bool verifyAnkiVideo(Context &context, const QDir &folder)
+{
+    // Use the public note-building path with the playing subtitle's immutable
+    // snapshot. This never contacts Anki or writes to an existing user profile.
+    const auto snapshot = Anki::Note::captureMedia(context);
+    AnkiProfile profile;
+    profile.setTermDeck("Release verification");
+    profile.setTermModel("Release verification");
+    profile.termFields()->setItems(QJsonObject{{"Expression", "{expression}"}, {"Video", ""}});
+    Term term;
+    term.setExpression(QStringLiteral("テスト"));
+    term.setSubtitle(snapshot.primaryText);
+    term.setStartTime(snapshot.primaryStart);
+    term.setEndTime(snapshot.primaryEnd);
+    const auto note = Anki::Note::build(profile, term, true, snapshot, {true, "Video"});
+    const auto videos = note.ankiObject.value("video").toArray();
+    if (!note.error.isEmpty() || videos.size() != 1 || snapshot.duration < 6.0) {
+        fail("Anki five-second video creation failed: " + note.error);
+        return false;
+    }
+    const auto video = videos.first().toObject();
+    const auto bytes = QByteArray::fromBase64(video.value("data").toString().toLatin1());
+    QFile exported(folder.filePath("anki-sentence.mp4"));
+    if (!video.value("filename").toString().endsWith(".mp4") ||
+        video.value("fields").toArray() != QJsonArray{"Video"} || bytes.size() < 1000 ||
+        !exported.open(QIODevice::WriteOnly) || exported.write(bytes) != bytes.size()) {
+        fail("Anki video payload is incomplete or targets the wrong note field.");
+        return false;
+    }
+    exported.close();
+
+    // Decode the exported AAC using the same deployed libmpv/FFmpeg libraries.
+    // The outer verifier checks duration and an audible PCM signal without any
+    // dependency on ffmpeg or ffprobe in the user's executable search path.
+    MpvEncodingContext decode;
+    decode.input = exported.fileName().toUtf8();
+    decode.aid = 1;
+    MpvAudioClipArgs clip;
+    clip.start = 0.0;
+    clip.end = 5.0;
+    clip.extension = ".wav";
+    const QString wave = MpvController::encodeAudioClip(decode, clip);
+    const bool copied = !wave.isEmpty() && QFile::copy(wave, folder.filePath("anki-decoded.wav"));
+    if (!wave.isEmpty()) QFile::remove(wave);
+    if (!copied) {
+        fail("Anki MP4 audio could not be decoded by the packaged runtime.");
+        return false;
+    }
+    return true;
 }
 }
 
@@ -182,7 +234,7 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
     timer->setInterval(100);
     QObject::connect(client, &MigakuClient::exportFailed, timer, [](const QString &error) { fail(error); });
     QObject::connect(client, &MigakuClient::filesExported, timer,
-        [client, output, count = 0](const QString &) mutable {
+        [&context, client, output, count = 0](const QString &) mutable {
             ++count;
             QDir folder(output);
             const auto images = folder.entryList({"*.jpg"}, QDir::Files);
@@ -211,15 +263,24 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
                 pcm.close();
                 QFile::copy(wave, folder.filePath("decoded.wav"));
                 QFile::remove(wave);
-                qInfo("Release check: playback, subtitles, JPG/MP3 export, audio decode and duplicate capture passed.");
+                if (!verifyAnkiVideo(context, folder)) return;
+                qInfo("Release check: playback, subtitles, JPG/MP3 export, five-second Anki MP4, audio decode and duplicate capture passed.");
                 QCoreApplication::exit(0);
             }
         });
     QObject::connect(timer, &QTimer::timeout, timer,
         [&context, timer, fixture, observedLoading, phase = 0, ticks = 0]() mutable {
-            if (++ticks > 250) { timer->stop(); fail("Timed out waiting for video/subtitle/export."); return; }
             auto *player = context.player();
             auto *state = player->state();
+            const auto *primary = context.subtitleLists()->primary();
+            if (++ticks > 250) {
+                timer->stop();
+                fail(QString("Timed out waiting for video/subtitle/export (phase=%1, position=%2, sid=%3, primary=%4, cue=%5, clipboard=%6).")
+                    .arg(phase).arg(state->timePosition()).arg(state->sid())
+                    .arg(primary ? primary->activeText() : QStringLiteral("missing"))
+                    .arg(state->subtitle()->text()).arg(QGuiApplication::clipboard()->text()));
+                return;
+            }
             if (phase == 0) {
                 if (!player->renderContext()) return;
                 player->controller()->loadFile(fixture);
@@ -229,11 +290,10 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
                 player->controller()->seek(1.5);
                 phase = 2;
             } else if (phase == 2 && state->pause() && state->timePosition() > 1.2 &&
-                       state->timePosition() < 1.8 &&
-                       !context.subtitleLists()->primary()->activeText().isEmpty()) {
+                       state->timePosition() < 1.8 && primary &&
+                       !primary->activeText().isEmpty()) {
                 // mpv's position and subtitle properties arrive separately after
                 // a seek. Wait for the same cue source the exporter will read.
-                const auto *primary = context.subtitleLists()->primary();
                 const auto *cue = state->subtitle();
                 if (!primary->fullTimelineReady() &&
                     (cue->text().trimmed().isEmpty() ||
@@ -242,6 +302,7 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
                 if (QGuiApplication::clipboard()->text() != primary->activeText()) return;
                 if (!*observedLoading || player->loading() || player->buffering()) { fail("Episode loading state did not start and clear around playback."); return; }
                 phase = 3;
+                timer->stop();
                 if (qEnvironmentVariableIsSet("MEMENTO_TEST_MOVIE_COPY")) {
                     context.settings()->setBehaviorSubtitleAutoCopy(false);
                     if (!QMetaObject::invokeMethod(player, "copyScreenshotAndSentence") ||
