@@ -24,8 +24,18 @@ Rectangle {
         const model = SubtitleLists.primary;
         subtitleLineModel = model;
         subtitleLineCount = model?.rowCount() ?? 0;
-        if (!subtitleSeekSettled.running)
-            subtitleLineIndex = model?.playbackRow ?? -1;
+        if (!subtitleSeekSettled.running) {
+            const reached = model?.playbackRow ?? -1;
+            // Several subtitle-list rows can start together (dialogue and signs).
+            // Keep the row the user chose until playback reaches another start.
+            if (subtitleSeekTarget >= 0 && reached >= 0 && subtitleLineIndex >= 0) {
+                const start = model.data(model.index(reached, 0), SubtitleListModel.StartRole);
+                if (Math.abs(start + root.player.state.subtitle.delay - subtitleSeekTarget) < 0.0001)
+                    return;
+            }
+            subtitleLineIndex = reached;
+            subtitleSeekTarget = -1;
+        }
     }
 
     Timer {
