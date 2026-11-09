@@ -4,6 +4,8 @@ add_library(
     context.h
     immersionstats.cpp
     immersionstats.h
+    videoexporter.cpp
+    videoexporter.h
 )
 target_compile_features(context PRIVATE cxx_std_20)
 target_include_directories(context PRIVATE ${MEMENTO_INCLUDE_DIRS})
@@ -22,6 +24,7 @@ target_link_libraries(
     PUBLIC mpvplayer
     PUBLIC torrentsearch
     PUBLIC Qt6::Core
+    PRIVATE Qt6::Concurrent
     PUBLIC settings
     PUBLIC subtitle
     PUBLIC utils

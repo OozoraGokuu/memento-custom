@@ -774,6 +774,18 @@ MenuBar {
         }
     }
 
+    ExportVideoDialog { id: exportVideoDialog; player: root.player }
+
+    Menu {
+        title: qsTr("Export Video")
+        width: Math.max(contentWidth + leftPadding + rightPadding, root.minimumMenuWidth)
+        Action {
+            text: VideoExporter.busy ? qsTr("Show export progress…") : qsTr("Export selected section…")
+            enabled: VideoExporter.busy || (root.player.state.vid > 0 && root.player.state.duration > 0)
+            onTriggered: exportVideoDialog.prepare()
+        }
+    }
+
     Menu {
         id: settingsMenu
         title: qsTr("&Settings")

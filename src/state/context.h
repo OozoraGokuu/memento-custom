@@ -37,6 +37,7 @@
 #include "quick/keytracker.h"
 #include "setting/settings.h"
 #include "state/immersionstats.h"
+#include "state/videoexporter.h"
 #include "subtitle/subtitlelists.h"
 #include "util/utils.h"
 
@@ -131,6 +132,7 @@ public:
      */
     [[nodiscard]]
     MigakuClient *migakuClient() const noexcept;
+    VideoExporter *videoExporter() const noexcept { return m_videoExporter; }
 
     /**
      * @brief Get the configured torrent RSS search and torrent-metadata client.
@@ -197,6 +199,8 @@ private:
     /* The Jimaku subtitle downloader. Has ownership. */
     JimakuClient *m_jimakuClient{new JimakuClient(this, this)};
     KitsunekkoClient *m_kitsunekkoClient{new KitsunekkoClient(this, this)};
+
+    VideoExporter *m_videoExporter{new VideoExporter(this, this)};
 
     /* The Migaku media exporter. Has ownership. */
     MigakuClient *m_migakuClient{new MigakuClient(this, this)};

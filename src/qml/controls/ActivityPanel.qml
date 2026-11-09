@@ -23,6 +23,7 @@ Frame {
             items.push({text: DictionaryController.busy ? DictionaryController.activity : qsTr("Updating dictionaries…"), progress: DictionaryController.busy ? DictionaryController.progress : -1});
         if (TorrentSearchClient.busy) items.push({text: TorrentSearchClient.status, progress: -1});
         if (MigakuClient.busy) items.push({text: qsTr("Exporting sentence image and audio…"), progress: -1});
+        if (VideoExporter.busy) items.push({text: VideoExporter.status, progress: VideoExporter.progress});
         return items;
     }
     visible: tasks.length > 0 || lastMessage.length > 0
@@ -48,6 +49,10 @@ Frame {
         Button { visible: root.mediaPlayer.loading || root.mediaPlayer.buffering; text: qsTr("Stop loading episode"); onClicked: root.mediaPlayer.controller.stop() }
     }
     Timer { id: dismissTimer; interval: 10000; onTriggered: root.lastMessage = "" }
+    Connections {
+        target: VideoExporter
+        function onFinished(success, message) { root.lastMessage = message; dismissTimer.restart(); }
+    }
     Connections {
         target: DictionaryController
         function onActivityChanged() {

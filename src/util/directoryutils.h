@@ -28,6 +28,9 @@
 namespace DirectoryUtils
 {
 
+QString safeMediaName(QString name, const QString &fallback);
+QString mediaCaptureDirectory(const QString &libraryTitle);
+
 /**
  * @brief Get the directory the executable is in.
  *

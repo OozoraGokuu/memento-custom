@@ -31,6 +31,7 @@
 #include <vector>
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QUuid>
@@ -128,7 +129,7 @@ QString normalizedSubtitleLocation(QString location)
     return result;
 }
 
-std::vector<LoadedSubtitleTrack> loadedSubtitleTracks(mpv_handle *handle)
+std::vector<LoadedSubtitleTrack> loadedSubtitleTracks(mpv_handle *handle, const QString &type = QStringLiteral("sub"))
 {
     mpv_node node{};
     if (::mpv_get_property(handle, "track-list", MPV_FORMAT_NODE, &node) < 0)
@@ -147,7 +148,7 @@ std::vector<LoadedSubtitleTrack> loadedSubtitleTracks(mpv_handle *handle)
     for (int index = 0; index < node.u.list->num; ++index)
     {
         const mpv_node &item = node.u.list->values[index];
-        if (nodeString(item, "type") != QStringLiteral("sub"))
+        if (nodeString(item, "type") != type)
         {
             continue;
         }
@@ -1138,25 +1139,14 @@ QVariantMap MpvController::saveScreenshot(
     if (capture.subtitleFrame.isNull())
         return {{"ok", false}, {"error", tr("Could not capture the current video frame.")}};
 
-    const auto safeName = [](QString name, const QString &fallback) {
-        name.replace(QRegularExpression(QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1f]")), "_");
-        name = name.trimmed().left(100);
-        while (name.endsWith('.') || name.endsWith(' ')) name.chop(1);
-        if (name.isEmpty() || name == "." || name == "..") name = fallback;
-        static const QRegularExpression reserved(
-            "^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",
-            QRegularExpression::CaseInsensitiveOption);
-        if (reserved.match(name).hasMatch()) name.prepend('_');
-        return name;
-    };
     const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     if (pictures.isEmpty())
         return {{"ok", false}, {"error", tr("The Pictures folder is unavailable.")}};
     const QString folder = QDir(pictures).filePath(
-        "Memento/" + safeName(libraryTitle, tr("Unsorted")));
+        "Memento/" + DirectoryUtils::safeMediaName(libraryTitle, tr("Unsorted")));
     if (!QDir().mkpath(folder))
         return {{"ok", false}, {"error", tr("Could not create the screenshot folder: %1").arg(folder)}};
-    const QString filename = safeName(QFileInfo(episodeName).completeBaseName(), "Screenshot") +
+    const QString filename = DirectoryUtils::safeMediaName(QFileInfo(episodeName).completeBaseName(), "Screenshot") +
         QString("_%1s_%2_%3.png")
             .arg(capture.position, 0, 'f', 3)
             .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"))
@@ -1446,7 +1436,8 @@ QString MpvController::encodeVideoClip(
     const MpvVideoClipArgs &args,
     const QString &subtitleFile,
     bool nativePrimary,
-    bool nativeSecondary)
+    bool nativeSecondary,
+    const MpvVideoExportOptions *exportOptions)
 {
     constexpr const char *FILE_EXTENSION = ".mp4";
 
@@ -1468,7 +1459,8 @@ QString MpvController::encodeVideoClip(
         {
             return {};
         }
-        argString += QString(",aid=%1").arg(context.aid).toUtf8();
+        if (!exportOptions || !exportOptions->externalAudio.valid())
+            argString += QString(",aid=%1").arg(context.aid).toUtf8();
     }
 
     QList<QPair<QByteArray, QByteArray>> options = {
@@ -1485,6 +1477,19 @@ QString MpvController::encodeVideoClip(
         );
     }
 
+    if (exportOptions)
+    {
+        options.emplaceBack("ovcopts", QString("b=%1k,preset=fast,threads=2")
+            .arg(exportOptions->videoKbps).toUtf8());
+        options.emplaceBack("oacopts", QString("b=%1k").arg(exportOptions->audioKbps).toUtf8());
+        options.emplaceBack("vf", QString("lavfi=[scale=%1:%2,format=yuv420p]")
+            .arg(exportOptions->width).arg(exportOptions->height).toUtf8());
+        options.emplaceBack("ofopts", "movflags=+faststart");
+        options.emplaceBack("network-timeout", "30");
+        options.emplaceBack("sub-visibility", "yes");
+        options.emplaceBack("secondary-sub-visibility", "yes");
+    }
+
     return encodeFile(
         context.input,
         context.scriptOptions,
@@ -1494,7 +1499,8 @@ QString MpvController::encodeVideoClip(
         args.subtitles ? &context : nullptr,
         args.subtitles ? subtitleFile : QString(),
         args.subtitles && nativePrimary,
-        args.subtitles && nativeSecondary
+        args.subtitles && nativeSecondary,
+        exportOptions
     );
 }
 
@@ -1676,7 +1682,8 @@ QString MpvController::encodeFile(
     const MpvEncodingContext *subtitleContext,
     const QString &generatedSubtitleFile,
     bool nativePrimary,
-    bool nativeSecondary)
+    bool nativeSecondary,
+    const MpvVideoExportOptions *exportOptions)
 {
     /* Create a valid temporary file name */
     QTemporaryFile file;
@@ -1684,7 +1691,9 @@ QString MpvController::encodeFile(
     {
         return {};
     }
-    const QString outputPath = file.fileName() + fileExtension;
+    const QString outputPath = exportOptions && !exportOptions->outputPath.isEmpty()
+        ? exportOptions->outputPath : file.fileName() + fileExtension;
+    const auto control = exportOptions ? exportOptions->control : nullptr;
     const QByteArray filename = outputPath.toUtf8();
     file.close();
 
@@ -1716,10 +1725,11 @@ QString MpvController::encodeFile(
     const auto destroyEncoder = qScopeGuard([&closeEncoder] {
         closeEncoder();
     });
-    const auto fail = [&closeEncoder, &outputPath] (
+    const auto fail = [&closeEncoder, &outputPath, &control] (
         const char *message) -> QString
     {
         qWarning("%s", message);
+        if (control) control->error = QString::fromUtf8(message);
         closeEncoder();
         QFile::remove(outputPath);
         return {};
@@ -1754,6 +1764,11 @@ QString MpvController::encodeFile(
     {
         return fail("Could not configure encoder");
     }
+
+    const bool externalAudio = exportOptions && exportOptions->externalAudio.valid();
+    if (externalAudio && (!setOption("pause", "yes") ||
+        !setStringListOption(enc_h, "audio-files", {exportOptions->externalAudio.externalFilename})))
+        return fail("Could not load the selected audio track");
 
     if (subtitleContext != nullptr)
     {
@@ -1805,15 +1820,41 @@ QString MpvController::encodeFile(
     }
 
     bool subtitlesConfigured = subtitleContext == nullptr;
+    bool audioConfigured = !externalAudio;
+    QElapsedTimer stalled;
+    stalled.start();
+    double lastPosition = -1.0;
     while (true)
     {
-        mpv_event *event = ::mpv_wait_event(enc_h, 100);
+        if (control && control->cancel.load()) return fail("Export cancelled.");
+        mpv_event *event = ::mpv_wait_event(enc_h, control ? 0.1 : 100);
+        if (control)
+        {
+            double position = 0.0;
+            if (::mpv_get_property(enc_h, "time-pos", MPV_FORMAT_DOUBLE, &position) >= 0)
+            {
+                control->progress.store(std::clamp((position - exportOptions->start) /
+                    (exportOptions->end - exportOptions->start), 0.0, 0.99));
+                if (position != lastPosition) { lastPosition = position; stalled.restart(); }
+            }
+            if (stalled.elapsed() > 60000) return fail("Export stopped receiving video. Check that the selected section is downloaded.");
+            if (event->event_id == MPV_EVENT_NONE) continue;
+        }
         if (event->event_id == MPV_EVENT_NONE ||
             event->event_id == MPV_EVENT_QUEUE_OVERFLOW)
         {
             qWarning()
                 << QString("mpv returned a bad event: %1").arg(event->event_id);
             return fail("Encoder stopped responding");
+        }
+        if (event->event_id == MPV_EVENT_FILE_LOADED && !audioConfigured)
+        {
+            const auto id = resolveSubtitleTrack(exportOptions->externalAudio,
+                loadedSubtitleTracks(enc_h, QStringLiteral("audio")));
+            if (!id || !setSubtitleSelection(enc_h, "aid", id))
+                return fail("Could not select the exported audio track");
+            audioConfigured = true;
+            if (subtitlesConfigured) ::mpv_set_property_string(enc_h, "pause", "no");
         }
         if (event->event_id == MPV_EVENT_FILE_LOADED &&
             !subtitlesConfigured)
@@ -1834,7 +1875,7 @@ QString MpvController::encodeFile(
         {
             const auto *end =
                 static_cast<const mpv_event_end_file *>(event->data);
-            if (!subtitlesConfigured || end == nullptr || end->error < 0)
+            if (!subtitlesConfigured || !audioConfigured || end == nullptr || end->error < 0)
             {
                 return fail("Could not encode file");
             }

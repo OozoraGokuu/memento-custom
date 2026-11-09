@@ -25,6 +25,8 @@
 #include <QObject>
 
 #include <functional>
+#include <atomic>
+#include <memory>
 #include <optional>
 
 #include <QImage>
@@ -128,6 +130,27 @@ struct MpvEncodingContext
     bool independentSecondaryDelay{false};
     SubtitleTrack primarySubtitle;
     SubtitleTrack secondarySubtitle;
+};
+
+/** Independent export settings. A worker writes error only before completion. */
+struct MpvEncodingControl
+{
+    std::atomic_bool cancel{false};
+    std::atomic<double> progress{0.0};
+    QString error;
+};
+
+struct MpvVideoExportOptions
+{
+    QString outputPath;
+    int width{0};
+    int height{0};
+    int videoKbps{0};
+    int audioKbps{128};
+    double start{0.0};
+    double end{0.0};
+    MpvEncodingContext::SubtitleTrack externalAudio;
+    std::shared_ptr<MpvEncodingControl> control;
 };
 
 /**
@@ -486,7 +509,8 @@ public:
         const MpvVideoClipArgs &args,
         const QString &subtitleFile = {},
         bool nativePrimary = false,
-        bool nativeSecondary = false);
+        bool nativeSecondary = false,
+        const MpvVideoExportOptions *exportOptions = nullptr);
 
 signals:
     void audioTrackSelected(int64_t id);
@@ -599,7 +623,8 @@ private:
         const MpvEncodingContext *subtitleContext = nullptr,
         const QString &generatedSubtitleFile = {},
         bool nativePrimary = false,
-        bool nativeSecondary = false);
+        bool nativeSecondary = false,
+        const MpvVideoExportOptions *exportOptions = nullptr);
 
     /**
      * @brief Snapshot script options required by a standalone encoder handle.

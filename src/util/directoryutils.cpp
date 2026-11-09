@@ -19,6 +19,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "util/directoryutils.h"
+#include <QRegularExpression>
+#include <QObject>
 
 #include <QDir>
 #include <QStandardPaths>
@@ -126,3 +128,23 @@ QString DirectoryUtils::getCacheConfig()
     return getCacheDir() + CACHE_CONFIG_FILE;
 }
 #endif
+
+QString DirectoryUtils::safeMediaName(QString name, const QString &fallback)
+{
+    name.replace(QRegularExpression(QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1f]")), "_");
+    name = name.trimmed().left(100);
+    while (name.endsWith('.') || name.endsWith(' ')) name.chop(1);
+    if (name.isEmpty() || name == "." || name == "..") name = fallback;
+    static const QRegularExpression reserved(
+        "^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",
+        QRegularExpression::CaseInsensitiveOption);
+    if (reserved.match(name).hasMatch()) name.prepend('_');
+    return name;
+}
+
+QString DirectoryUtils::mediaCaptureDirectory(const QString &libraryTitle)
+{
+    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    return pictures.isEmpty() ? QString() : QDir(pictures).filePath(
+        "Memento/" + safeMediaName(libraryTitle, QObject::tr("Unsorted")));
+}

@@ -184,6 +184,9 @@ static void registerQmlTypes(Context &context)
     qmlRegisterSingletonInstance<AniListClient>(
         MEMENTO_URI, 1, 0, "AniListClient", context.aniListClient());
 
+    qmlRegisterSingletonInstance<VideoExporter>(
+        MEMENTO_URI, 1, 0, "VideoExporter", context.videoExporter());
+
     /* Migaku Types */
 
     qmlRegisterSingletonInstance<MigakuClient>(
