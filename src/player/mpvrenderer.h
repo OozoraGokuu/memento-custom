@@ -50,7 +50,7 @@ public:
      * @param size The size of the requested framebuffer.
      * @return A QOpenGLFramebufferObject of size.
      */
-    QOpenGLFramebufferObject *createFramebufferObject(const QSize &size);
+    QOpenGLFramebufferObject *createFramebufferObject(const QSize &size) override;
 
     /**
      * @brief Renders the data from mpv to the framebuffer.
