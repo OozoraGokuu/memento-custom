@@ -191,6 +191,11 @@ MenuBar {
         }
 
         Action {
+            text: qsTr("Add Multiple Magnets...")
+            onTriggered: multipleMagnetsDialog.open()
+        }
+
+        Action {
             text: qsTr("Find Anime &Streams...")
             shortcut: "Ctrl+Shift+N"
             onTriggered: root.torrentSearchRequested()
@@ -879,6 +884,8 @@ MenuBar {
             MementoSettings.windowLibrary = true;
         }
     }
+
+    MultipleMagnetsDialog { id: multipleMagnetsDialog }
 
     Dialog {
         id: loadMagnetDialog

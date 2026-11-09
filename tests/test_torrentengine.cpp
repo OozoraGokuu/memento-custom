@@ -323,6 +323,133 @@ private slots:
             QStringLiteral("supported video episodes")));
     }
 
+    void mergesMagnetsWithIndependentEpisodeIdentityAndPersists()
+    {
+        QTemporaryDir directory;
+        QByteArray hash2, hash10;
+        const QString source2 = directory.filePath("two.torrent");
+        const QString source10 = directory.filePath("ten.torrent");
+        QVERIFY(writeFile(source2, torrentNamed("Episode 2.mkv", &hash2)));
+        QVERIFY(writeFile(source10, torrentNamed("Episode 10.mkv", &hash10)));
+        const QString magnets = "magnet:?xt=urn:btih:" + QString::fromLatin1(hash10) +
+            "\nmagnet:?xt=urn:btih:" + QString::fromLatin1(hash2);
+        QString collectionId;
+        {
+            EpisodeFolder library;
+            QVERIFY(library.addTorrent(QUrl::fromLocalFile(source10)) >= 0);
+            library.setEpisodeWatched(0, true);
+            QVERIFY(library.addTorrent(QUrl::fromLocalFile(source2)) >= 0);
+            const QString oldStream = library.episodePath(0);
+            QVERIFY(!oldStream.isEmpty());
+            QCOMPARE(library.addMultipleMagnets("Combined series", magnets), 0);
+            QCOMPARE(library.library().size(), 1);
+            QCOMPARE(library.totalCount(), 2);
+            QCOMPARE(library.watchedCount(), 1);
+            QCOMPARE(library.currentEntry().value("sourceCount").toInt(), 2);
+            QCOMPARE(library.episodes().at(0).toMap().value("title").toString(), "Episode 2.mkv");
+            QVERIFY(library.episodes().at(1).toMap().value("watched").toBool());
+            collectionId = library.currentEntry().value("id").toString();
+            QCOMPARE(library.playbackInfo(oldStream).value("key").toString(), collectionId);
+            QCOMPARE(library.playbackInfo(oldStream).value("filename").toString(), "Episode 2.mkv");
+            const QString first = library.episodePath(0);
+            const QString second = library.episodePath(1);
+            QVERIFY(!first.isEmpty());
+            QVERIFY(!second.isEmpty());
+            QVERIFY(first != second); // Both torrents have file index 0.
+            QVERIFY(!library.isWatched(first));
+            QVERIFY(library.isWatched(second));
+            library.recordPlayed(first);
+            QCOMPARE(library.currentEntry().value("lastPlayedIndex").toInt(), 0);
+            // Repeated metadata must replace only its own rows, preserving the name.
+            auto *engine = library.findChild<TorrentEngine *>();
+            QVERIFY(engine);
+            engine->metadataReady("torrent-v1-" + QString::fromLatin1(hash10), "ignored", {"Episode 10.mkv"}, {1}, {0}, {});
+            QCOMPARE(library.totalCount(), 2);
+            QCOMPARE(library.currentEntry().value("title").toString(), "Combined series");
+            QVERIFY(library.isWatched(second));
+            QCOMPARE(library.addMultipleMagnets("Duplicate group", magnets), -1);
+            QCOMPARE(library.library().size(), 1);
+        }
+        {
+            EpisodeFolder restored;
+            QCOMPARE(restored.library().size(), 1);
+            QCOMPARE(restored.currentEntry().value("id").toString(), collectionId);
+            QCOMPARE(restored.totalCount(), 2);
+            QCOMPARE(restored.watchedCount(), 1);
+            QTRY_COMPARE(restored.currentEntry().value("availableCount").toInt(), 2);
+            const QString second = restored.episodePath(1);
+            QVERIFY(!second.isEmpty());
+            QVERIFY(restored.isWatched(second));
+            QCOMPARE(restored.playbackInfo(second).value("filename").toString(), "Episode 10.mkv");
+            restored.removeEntry(0);
+            QVERIFY(restored.library().isEmpty());
+            QVERIFY(!restored.isTransientStream(second));
+        }
+    }
+
+    void multipleMagnetsValidateBeforeChangingLibraryAndMergeAsyncMetadata()
+    {
+        EpisodeFolder library;
+        const QString first = "magnet:?xt=urn:btih:1111111111111111111111111111111111111111";
+        const QString second = "magnet:?xt=urn:btih:2222222222222222222222222222222222222222";
+        QCOMPARE(library.addMultipleMagnets("Bad", first + "\nnot a magnet"), -1);
+        QCOMPARE(library.addMultipleMagnets("Bad", first + "\n" + first), -1);
+        QCOMPARE(library.addMultipleMagnets("", first + "\n" + second), -1);
+        QVERIFY(library.library().isEmpty());
+        QCOMPARE(library.addMultipleMagnets("Pending", first + "\n" + second + "\n" + first), 0);
+        QCOMPARE(library.currentEntry().value("sourceCount").toInt(), 2);
+        QCOMPARE(library.totalCount(), 0);
+        auto *engine = library.findChild<TorrentEngine *>();
+        QVERIFY(engine);
+        const QString id1 = TorrentEngine::inspectMagnet(first).id;
+        const QString id2 = TorrentEngine::inspectMagnet(second).id;
+        engine->metadataReady(id2, "Second source", {"Episode 10.mkv"}, {10}, {0}, {});
+        engine->metadataReady(id1, "First source", {"Episode 2.mkv"}, {10}, {0}, {});
+        QCOMPARE(library.totalCount(), 2);
+        QCOMPARE(library.episodes().at(0).toMap().value("title").toString(), "Episode 2.mkv");
+        library.setEpisodeWatched(1, true);
+        engine->metadataReady(id1, "Replacement", {"Episode 2.mkv", "Episode 3.mkv"}, {10, 20}, {0, 1}, {});
+        QCOMPARE(library.totalCount(), 3);
+        QVERIFY(library.episodes().at(2).toMap().value("watched").toBool());
+        engine->metadataReady(id1, "Empty", {}, {}, {}, {});
+        QCOMPARE(library.totalCount(), 1);
+        QCOMPARE(library.currentEntry().value("title").toString(), "Pending");
+        QVERIFY(library.episodes().at(0).toMap().value("watched").toBool());
+        library.removeEntry(0);
+        QVERIFY(library.library().isEmpty());
+    }
+
+    void failedCollectionCommitPreservesIndividualEntries()
+    {
+#if defined(Q_OS_UNIX)
+        QTemporaryDir directory;
+        QByteArray hash1, hash2;
+        const QString source1 = directory.filePath("one.torrent");
+        const QString source2 = directory.filePath("two.torrent");
+        QVERIFY(writeFile(source1, torrentNamed("one.mkv", &hash1)));
+        QVERIFY(writeFile(source2, torrentNamed("two.mkv", &hash2)));
+        EpisodeFolder library;
+        QVERIFY(library.addTorrent(QUrl::fromLocalFile(source1)) >= 0);
+        const QString stream = library.episodePath(0);
+        QVERIFY(library.addTorrent(QUrl::fromLocalFile(source2)) >= 0);
+        const auto previous = library.library();
+        const auto config = DirectoryUtils::getConfigDir();
+        const auto permissions = QFileInfo(config).permissions();
+        QVERIFY(QFile::setPermissions(config, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        const auto restorePermissions = qScopeGuard([&] { QFile::setPermissions(config, permissions); });
+        QCOMPARE(library.addMultipleMagnets("Must roll back",
+            "magnet:?xt=urn:btih:" + QString::fromLatin1(hash1) +
+            "\nmagnet:?xt=urn:btih:" + QString::fromLatin1(hash2)), -1);
+        QCOMPARE(library.library().size(), 2);
+        QCOMPARE(library.library().at(0).toMap().value("id"), previous.at(0).toMap().value("id"));
+        QVERIFY(library.containsFile(stream));
+        QVERIFY(library.isTransientStream(stream));
+        QVERIFY(QFile::setPermissions(config, permissions));
+        library.removeEntry(1);
+        library.removeEntry(0);
+#endif
+    }
+
     void internalTorrentStreamsAreTransient()
     {
         QTemporaryDir directory;

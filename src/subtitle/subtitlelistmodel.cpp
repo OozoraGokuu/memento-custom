@@ -281,11 +281,21 @@ qsizetype SubtitleListModel::addSubtitle(
 void SubtitleListModel::selectPosition(double position)
 {
     constexpr double TIME_DELTA = 0.0001;
+    if (!std::isfinite(position)) return;
 
     m_lastPosition = position;
     m_hasLastPosition = true;
 
     const double adjustedPosition = position + TIME_DELTA;
+    const auto reached = std::upper_bound(
+        m_items.cbegin(), m_items.cend(), adjustedPosition,
+        [](double time, const SubtitleEntry &entry) { return time < entry.start; });
+    const int playbackRow = static_cast<int>(reached - m_items.cbegin()) - 1;
+    if (m_playbackRow != playbackRow)
+    {
+        m_playbackRow = playbackRow;
+        emit playbackRowChanged();
+    }
     auto upperIt = std::lower_bound(
         std::begin(m_items),
         std::end(m_items),
@@ -496,6 +506,11 @@ QList<int> SubtitleListModel::find(QString str, bool ignoreWhitespace) const
 
 void SubtitleListModel::clear()
 {
+    if (m_playbackRow != -1)
+    {
+        m_playbackRow = -1;
+        emit playbackRowChanged();
+    }
     m_selectionModel->clear();
     resetActiveSubtitle();
     m_blockAdds = false;

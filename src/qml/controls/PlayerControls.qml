@@ -16,16 +16,42 @@ Rectangle {
     readonly property real position: durationSlider.position
     // Keep the same zero-based row cursor used by subtitle-list search.
     property int subtitleLineIndex: -1
+    property int subtitleLineCount: 0
     property var subtitleLineModel: null
+    property real subtitleSeekTarget: -1
+
+    function syncSubtitleLine() {
+        const model = SubtitleLists.primary;
+        subtitleLineModel = model;
+        subtitleLineCount = model?.rowCount() ?? 0;
+        if (!subtitleSeekSettled.running)
+            subtitleLineIndex = model?.playbackRow ?? -1;
+    }
+
+    Timer {
+        id: subtitleSeekSettled
+        interval: 1500
+        onTriggered: root.syncSubtitleLine()
+    }
 
     function resetSubtitleLine() {
+        subtitleSeekSettled.stop();
+        subtitleSeekTarget = -1;
         subtitleLineIndex = -1;
         subtitleLineModel = null;
+        Qt.callLater(root.syncSubtitleLine);
     }
 
     Connections {
         target: root.player.state
         function onPathChanged() { root.resetSubtitleLine(); }
+        function onTimePositionChanged(position) {
+            if (subtitleSeekSettled.running &&
+                    Math.abs(position - root.subtitleSeekTarget) < 0.25) {
+                subtitleSeekSettled.stop();
+                Qt.callLater(root.syncSubtitleLine);
+            }
+        }
     }
 
     Connections {
@@ -36,6 +62,7 @@ Rectangle {
     Connections {
         target: SubtitleLists.primary
         function onModelReset() { root.resetSubtitleLine(); }
+        function onPlaybackRowChanged() { root.syncSubtitleLine(); }
     }
 
     function seekAdjacentSubtitle(direction) {
@@ -57,7 +84,7 @@ Rectangle {
         if (count < 1) return;
         if (root.subtitleLineModel !== model) {
             root.subtitleLineModel = model;
-            root.subtitleLineIndex = -1;
+            root.subtitleLineIndex = model.playbackRow;
         }
         let row = root.subtitleLineIndex + direction;
         if (root.subtitleLineIndex < 0)
@@ -69,6 +96,8 @@ Rectangle {
         const target = Math.max(0, start + state.subtitle.delay);
         if (!Number.isFinite(target)) return;
         root.subtitleLineIndex = row;
+        root.subtitleSeekTarget = target;
+        subtitleSeekSettled.restart();
         model.selectionModel.select(modelIndex, ItemSelectionModel.ClearAndSelect);
         model.selectionModel.setCurrentIndex(modelIndex, ItemSelectionModel.NoUpdate);
         root.player.controller.seek(target);
@@ -125,6 +154,13 @@ Rectangle {
         anchors.right: parent.right
         anchors.rightMargin: 10
         height: 34
+        Label {
+            objectName: "subtitleCounter"
+            visible: !!SubtitleLists.primary?.fullTimelineReady
+            text: qsTr("Subtitle %1 / %2")
+                .arg(root.subtitleLineIndex + 1)
+                .arg(root.subtitleLineCount)
+        }
         ToolButton {
             objectName: "copySubtitleButton"
             text: qsTr("Copy text")

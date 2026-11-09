@@ -54,6 +54,7 @@ qt_add_qml_module(
     URI Ripose.Memento
     VERSION 1.0
     QML_FILES
+        qml/dialogs/MultipleMagnetsDialog.qml
         qml/controls/ActivityPanel.qml
         qml/controls/AnkiFieldTextArea.qml
         qml/controls/AnkiMarkerDescription.qml

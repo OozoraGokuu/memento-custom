@@ -1863,6 +1863,27 @@ TorrentEngine::AddResult TorrentEngine::addTorrentFile(const QString &path)
     return d->addTorrentFile(path);
 }
 
+TorrentEngine::AddResult TorrentEngine::inspectMagnet(const QString &magnet)
+{
+    AddResult result;
+    if (magnet.size() > 16384 || !magnet.startsWith("magnet:", Qt::CaseInsensitive))
+    {
+        result.error = tr("Enter one valid magnet link per line.");
+        return result;
+    }
+    lt::error_code error;
+    const auto params = lt::parse_magnet_uri(magnet.toStdString(), error);
+    if (!error) result.id = idFromHashes(params.info_hashes);
+    if (result.id.isEmpty())
+    {
+        result.error = tr("The magnet link has no supported info hash.");
+        return result;
+    }
+    result.title = QString::fromStdString(params.name);
+    result.source = magnet;
+    return result;
+}
+
 TorrentEngine::AddResult TorrentEngine::addMagnet(const QString &magnet)
 {
     return d->addMagnet(magnet);
@@ -1896,7 +1917,10 @@ void TorrentEngine::removeTorrent(const QString &id, bool deleteFiles)
     const QString source = d->sources.take(id);
     d->disconnectClients(id);
     const lt::torrent_handle handle = d->handles.take(id);
-    if (handle.is_valid())
+    // remove_torrent may invalidate the handle immediately. Keep the initial
+    // state so cleanup always waits for its removal alert when it was active.
+    const bool wasValid = handle.is_valid();
+    if (wasValid)
     {
         if (deleteFiles)
         {
@@ -1911,7 +1935,7 @@ void TorrentEngine::removeTorrent(const QString &id, bool deleteFiles)
     d->activeFiles.remove(id);
     d->issuedStreamUrls.remove(id);
     d->removeStoredMetadata(id, source);
-    if (deleteFiles && !handle.is_valid())
+    if (deleteFiles && !wasValid)
     {
         d->removeCachedData(id);
     }

@@ -37,6 +37,7 @@ class SubtitleListModel : public QAbstractListModel
 {
     Q_OBJECT
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
+    Q_PROPERTY(int playbackRow READ playbackRow NOTIFY playbackRowChanged)
 
     Q_PROPERTY(
         QItemSelectionModel *selectionModel
@@ -75,6 +76,7 @@ class SubtitleListModel : public QAbstractListModel
     )
 
 public:
+    int playbackRow() const noexcept { return m_playbackRow; }
     bool loading() const { return m_loading; }
     void setLoading(bool value) { if (m_loading != value) { m_loading = value; emit loadingChanged(); } }
     enum ItemRoles
@@ -250,6 +252,7 @@ public:
     const std::vector<SubtitleEntry> &items() const noexcept;
 
 signals:
+    void playbackRowChanged();
     void loadingChanged();
     /**
      * @brief Emitted when native subtitle data becomes available or is reset.
@@ -324,6 +327,7 @@ private:
 
     /* true only when m_items is a complete parsed track */
     bool m_fullTimelineReady{false};
+    int m_playbackRow{-1};
 
     /* List of items sorted by start time */
     std::vector<SubtitleEntry> m_items;

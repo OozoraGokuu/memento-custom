@@ -399,6 +399,9 @@ public:
     /** Copy a subtitle-bearing frame and return its matching subtitle text. */
     Q_INVOKABLE QVariantMap copySubtitleScreenshot();
 
+    /** Saves a PNG under Pictures/Memento/<library title>. */
+    Q_INVOKABLE QVariantMap saveScreenshot(const QString &libraryTitle, const QString &episodeName);
+
     /**
      * @brief Capture a subtitle screenshot with explicit per-slot visibility.
      *

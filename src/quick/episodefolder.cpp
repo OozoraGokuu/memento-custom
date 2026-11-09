@@ -28,6 +28,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
+#include <QUuid>
 
 #include "util/directoryutils.h"
 #include "quick/torrentengine.h"
@@ -112,7 +113,8 @@ QJsonObject readLibraryObject()
             }
             const QJsonObject entry = value.toObject();
             for (const char *key : {
-                    "episodes", "episodeSizes", "torrentFileIndices", "watched"})
+                    "episodes", "episodeSizes", "torrentFileIndices", "watched",
+                    "torrentIds", "torrentSources", "episodeTorrentIds"})
             {
                 const QJsonValue list = entry.value(QLatin1String(key));
                 if (list.isArray() &&
@@ -609,7 +611,7 @@ QVariantList EpisodeFolder::episodes() const
             entry.torrentFileIndices.at(index) : -1;
         const QString path = torrent ?
             m_torrentEngine->urlFor(
-                entry.id, torrentFileIndex, displayName(relativePath)
+                entry.ownerId(index), torrentFileIndex, displayName(relativePath)
             ) :
             (index < entry.resolvedPaths.size() ?
                 entry.resolvedPaths.at(index) : QString());
@@ -876,6 +878,112 @@ int EpisodeFolder::addMagnet(const QString &magnet)
     return m_currentIndex;
 }
 
+int EpisodeFolder::addMultipleMagnets(const QString &title, const QString &magnets)
+{
+    const QString name = title.trimmed();
+    const QStringList lines = magnets.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+    if (name.isEmpty() || name.size() > 200 || lines.size() < 2 || lines.size() > 100)
+    {
+        setLastError(tr("Enter a collection name and 2–100 magnet links, one per line."));
+        return -1;
+    }
+    QList<TorrentEngine::AddResult> sources;
+    QSet<QString> seen;
+    QSet<QString> existingIds;
+    qsizetype episodeCount = 0;
+    for (const QString &line : lines)
+    {
+        const auto result = TorrentEngine::inspectMagnet(line.trimmed());
+        if (!result.valid()) { setLastError(result.error); return -1; }
+        if (seen.contains(result.id)) continue;
+        seen.insert(result.id);
+        const int existing = findEntryById(result.id);
+        if (existing >= 0)
+        {
+            const Entry &entry = m_entries.at(existing);
+            if (!entry.torrentIds.isEmpty())
+            {
+                setLastError(tr("A magnet already belongs to the collection '%1'.").arg(entry.title));
+                return -1;
+            }
+            existingIds.insert(entry.id);
+            episodeCount += entry.relativePaths.size();
+        }
+        sources.append(result);
+    }
+    if (sources.size() < 2)
+    {
+        setLastError(tr("Enter at least two different magnet links."));
+        return -1;
+    }
+    if (episodeCount > MAX_EPISODES_PER_ENTRY ||
+        m_entries.size() - existingIds.size() >= MAX_LIBRARY_ENTRIES)
+    {
+        setLastError(tr("The collection exceeds the media library limits."));
+        return -1;
+    }
+    QStringList addedIds;
+    for (const auto &source : sources)
+    {
+        if (existingIds.contains(source.id)) continue;
+        const auto added = m_torrentEngine->addMagnet(source.source);
+        if (!added.valid())
+        {
+            for (const QString &id : addedIds) m_torrentEngine->removeTorrent(id);
+            setLastError(added.error);
+            return -1;
+        }
+        addedIds.append(added.id);
+    }
+    const QVector<Entry> previousEntries = m_entries;
+    const int previousIndex = m_currentIndex;
+    Entry collection;
+    collection.id = "collection-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    collection.title = name;
+    collection.type = "torrent";
+    for (const auto &source : sources)
+    {
+        collection.torrentIds.append(source.id);
+        const int existing = findEntryById(source.id);
+        if (existing < 0)
+        {
+            collection.torrentSources.append(source.source);
+            continue;
+        }
+        const Entry &entry = m_entries.at(existing);
+        collection.torrentSources.append(entry.source);
+        if (collection.audioTrack < 0) collection.audioTrack = entry.audioTrack;
+        if (collection.subtitleLink.isEmpty()) collection.subtitleLink = entry.subtitleLink;
+        for (int row = 0; row < entry.relativePaths.size(); ++row)
+        {
+            const QString path = source.id + '/' + entry.relativePaths.at(row);
+            collection.relativePaths.append(path);
+            collection.resolvedPaths.append(QString());
+            collection.episodeSizes.append(entry.episodeSizes.value(row));
+            collection.torrentFileIndices.append(entry.torrentFileIndices.value(row, -1));
+            collection.episodeTorrentIds.append(source.id);
+            if (entry.watched.contains(entry.relativePaths.at(row))) collection.watched.insert(path);
+            if (entry.lastPlayed == entry.relativePaths.at(row)) collection.lastPlayed = path;
+        }
+    }
+    sortTorrentEpisodes(collection);
+    for (int index = m_entries.size() - 1; index >= 0; --index)
+        if (existingIds.contains(m_entries.at(index).id)) m_entries.removeAt(index);
+    m_entries.append(std::move(collection));
+    m_currentIndex = m_entries.size() - 1;
+    if (!writeLibrary())
+    {
+        m_entries = previousEntries;
+        m_currentIndex = previousIndex;
+        for (const QString &id : addedIds) m_torrentEngine->removeTorrent(id);
+        reportPersistenceError();
+        return -1;
+    }
+    setLastError({});
+    notifyEntryChanged(true);
+    return m_currentIndex;
+}
+
 bool EpisodeFolder::setContentFolder(int entryIndex, const QUrl &folderUrl)
 {
     if (entryIndex < 0 || entryIndex >= m_entries.size())
@@ -977,7 +1085,8 @@ void EpisodeFolder::removeEntry(int entryIndex, bool deleteCache)
     }
     if (removed.type == "torrent")
     {
-        m_torrentEngine->removeTorrent(removed.id, deleteCache);
+        for (const QString &id : removed.sourceIds())
+            m_torrentEngine->removeTorrent(id, deleteCache);
     }
     setLastError({});
     notifyEntryChanged(true);
@@ -999,6 +1108,19 @@ QStringList EpisodeFolder::rescan(int entryIndex)
     if (entry.type == "folder")
     {
         static_cast<void>(scanFolder(entry));
+    }
+    else if (!entry.torrentIds.isEmpty())
+    {
+        for (int member = 0; member < entry.torrentIds.size(); ++member)
+        {
+            const auto result = m_torrentEngine->restore(
+                entry.torrentIds.at(member), entry.torrentSources.at(member));
+            if (!result.valid())
+            {
+                setLastError(result.error);
+                retainOperationError = true;
+            }
+        }
     }
     else
     {
@@ -1260,7 +1382,7 @@ QString EpisodeFolder::episodePath(int episodeIndex)
             return {};
         }
         const QString url = m_torrentEngine->streamUrl(
-            entry.id,
+            entry.ownerId(episodeIndex),
             entry.torrentFileIndices.at(episodeIndex),
             displayName(entry.relativePaths.at(episodeIndex))
         );
@@ -1327,8 +1449,11 @@ int EpisodeFolder::findEntryForFile(
         const int entryIndex = findEntryById(torrentId);
         if (entryIndex >= 0)
         {
-            const int found = m_entries.at(entryIndex)
-                .torrentFileIndices.indexOf(torrentFileIndex);
+            const Entry &entry = m_entries.at(entryIndex);
+            int found = -1;
+            for (int episode = 0; episode < entry.torrentFileIndices.size(); ++episode)
+                if (entry.torrentFileIndices.at(episode) == torrentFileIndex &&
+                    entry.ownerId(episode) == torrentId) { found = episode; break; }
             if (found >= 0)
             {
                 if (episodeIndex != nullptr)
@@ -1360,7 +1485,7 @@ int EpisodeFolder::findEntryById(const QString &id) const
 {
     for (int index = 0; index < m_entries.size(); ++index)
     {
-        if (m_entries.at(index).id == id)
+        if (m_entries.at(index).id == id || m_entries.at(index).torrentIds.contains(id))
         {
             return index;
         }
@@ -1382,14 +1507,12 @@ int EpisodeFolder::availableCount(const Entry &entry) const noexcept
 {
     if (entry.type == "torrent")
     {
-        if (!m_torrentEngine->status(entry.id).value("ready").toBool())
-        {
-            return 0;
-        }
+        const auto ready = readyTorrentIds(entry);
         int result = 0;
         for (int index = 0; index < entry.relativePaths.size(); ++index)
         {
-            result += index < entry.episodeSizes.size() &&
+            result += ready.contains(entry.ownerId(index)) &&
+                    index < entry.episodeSizes.size() &&
                     entry.episodeSizes.at(index) > 0 &&
                     index < entry.torrentFileIndices.size() &&
                     entry.torrentFileIndices.at(index) >= 0 ? 1 : 0;
@@ -1403,11 +1526,67 @@ int EpisodeFolder::availableCount(const Entry &entry) const noexcept
     );
 }
 
+QSet<QString> EpisodeFolder::readyTorrentIds(const Entry &entry) const
+{
+    QSet<QString> ready;
+    if (entry.type == "torrent")
+        for (const QString &id : entry.sourceIds())
+            if (m_torrentEngine->status(id).value("ready").toBool()) ready.insert(id);
+    return ready;
+}
+
+QVariantMap EpisodeFolder::torrentStatus(const Entry &entry) const
+{
+    if (entry.torrentIds.isEmpty()) return m_torrentEngine->status(entry.id);
+    bool ready = false, loading = false;
+    qint64 rate = 0;
+    int peers = 0;
+    double progress = 0;
+    for (const QString &id : entry.torrentIds)
+    {
+        const auto status = m_torrentEngine->status(id);
+        ready |= status.value("ready").toBool();
+        loading |= status.value("loadingMetadata").toBool();
+        rate += status.value("downloadRate").toLongLong();
+        peers += status.value("peers").toInt();
+        progress += status.value("progress").toDouble();
+    }
+    return {{"ready", ready}, {"loadingMetadata", loading},
+        {"state", loading ? tr("Loading metadata") : tr("Collection")},
+        {"downloadRate", rate}, {"peers", peers},
+        {"progress", progress / entry.torrentIds.size()}};
+}
+
+void EpisodeFolder::sortTorrentEpisodes(Entry &entry)
+{
+    QList<int> order;
+    for (int row = 0; row < entry.relativePaths.size(); ++row) order.append(row);
+    QCollator collator{QLocale{QLocale::English}};
+    collator.setNumericMode(true);
+    collator.setCaseSensitivity(Qt::CaseInsensitive);
+    std::stable_sort(order.begin(), order.end(), [&](int left, int right) {
+        const int compared = collator.compare(
+            entry.relativePaths.at(left).sliced(entry.ownerId(left).size() + 1),
+            entry.relativePaths.at(right).sliced(entry.ownerId(right).size() + 1));
+        return compared ? compared < 0 : entry.relativePaths.at(left) < entry.relativePaths.at(right);
+    });
+    const Entry old = entry;
+    for (int row = 0; row < order.size(); ++row)
+    {
+        const int source = order.at(row);
+        entry.relativePaths[row] = old.relativePaths.at(source);
+        entry.resolvedPaths[row] = old.resolvedPaths.value(source);
+        entry.episodeSizes[row] = old.episodeSizes.at(source);
+        entry.torrentFileIndices[row] = old.torrentFileIndices.at(source);
+        entry.episodeTorrentIds[row] = old.episodeTorrentIds.at(source);
+    }
+}
+
 QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
 {
-    const QVariantMap torrentStatus = entry.type == "torrent" ?
-        m_torrentEngine->status(entry.id) : QVariantMap();
-    const bool torrentReady = torrentStatus.value("ready").toBool();
+    const QVariantMap status = entry.type == "torrent" ?
+        torrentStatus(entry) : QVariantMap();
+    const auto ready = readyTorrentIds(entry);
     int nextEpisode = -1;
     int lastPlayedIndex = -1;
     for (int episodeIndex = 0;
@@ -1419,7 +1598,7 @@ QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
             lastPlayedIndex = episodeIndex;
         }
         const bool available = entry.type == "torrent" ?
-            (torrentReady &&
+            (ready.contains(entry.ownerId(episodeIndex)) &&
              episodeIndex < entry.episodeSizes.size() &&
              entry.episodeSizes.at(episodeIndex) > 0 &&
              episodeIndex < entry.torrentFileIndices.size() &&
@@ -1439,6 +1618,7 @@ QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
         {"type", entry.type},
         {"source", entry.source},
         {"folder", entry.folder},
+        {"sourceCount", entry.type == "torrent" ? entry.sourceIds().size() : 0},
         {"totalCount", entry.relativePaths.size()},
         {"watchedCount", watchedCount(entry)},
         {"availableCount", availableCount(entry)},
@@ -1449,12 +1629,12 @@ QVariantMap EpisodeFolder::entryMap(const Entry &entry, int index) const
     };
     if (entry.type == "torrent")
     {
-        result.insert("ready", torrentStatus.value("ready"));
-        result.insert("loadingMetadata", torrentStatus.value("loadingMetadata"));
-        result.insert("torrentState", torrentStatus.value("state"));
-        result.insert("downloadRate", torrentStatus.value("downloadRate"));
-        result.insert("peers", torrentStatus.value("peers"));
-        result.insert("downloadProgress", torrentStatus.value("progress"));
+        result.insert("ready", status.value("ready"));
+        result.insert("loadingMetadata", status.value("loadingMetadata"));
+        result.insert("torrentState", status.value("state"));
+        result.insert("downloadRate", status.value("downloadRate"));
+        result.insert("peers", status.value("peers"));
+        result.insert("downloadProgress", status.value("progress"));
     }
     return result;
 }
@@ -1468,7 +1648,7 @@ QStringList EpisodeFolder::playableFiles(const Entry &entry) const
              index < entry.torrentFileIndices.size(); ++index)
         {
             result.emplaceBack(m_torrentEngine->urlFor(
-                entry.id,
+                entry.ownerId(index),
                 entry.torrentFileIndices.at(index),
                 displayName(entry.relativePaths.at(index))
             ));
@@ -1699,6 +1879,48 @@ bool EpisodeFolder::updateTorrentMetadata(
     const QVector<Entry> previousEntries = m_entries;
     const int previousIndex = m_currentIndex;
     Entry &entry = m_entries[entryIndex];
+    if (!entry.torrentIds.isEmpty())
+    {
+        const int member = entry.torrentIds.indexOf(id);
+        if (member < 0) return false;
+        if (entry.relativePaths.size() - entry.episodeTorrentIds.count(id) +
+            episodes.size() > MAX_EPISODES_PER_ENTRY)
+        {
+            setLastError(tr("This collection has too many episodes."));
+            return false;
+        }
+        for (int row = entry.relativePaths.size() - 1; row >= 0; --row)
+        {
+            if (entry.ownerId(row) != id) continue;
+            entry.relativePaths.removeAt(row);
+            entry.resolvedPaths.removeAt(row);
+            entry.episodeSizes.removeAt(row);
+            entry.torrentFileIndices.removeAt(row);
+            entry.episodeTorrentIds.removeAt(row);
+        }
+        for (const TorrentEpisode &episode : episodes)
+        {
+            entry.relativePaths.append(id + '/' + episode.path);
+            entry.resolvedPaths.append(QString());
+            entry.episodeSizes.append(episode.size);
+            entry.torrentFileIndices.append(episode.fileIndex);
+            entry.episodeTorrentIds.append(id);
+        }
+        if (!storedSource.isEmpty()) entry.torrentSources[member] = storedSource;
+        sortTorrentEpisodes(entry);
+        if (selectEntry) m_currentIndex = entryIndex;
+        if (!writeLibrary())
+        {
+            m_entries = previousEntries;
+            m_currentIndex = previousIndex;
+            reportPersistenceError();
+            return false;
+        }
+        setLastError(episodes.isEmpty() ? tr("One magnet contains no supported video episodes.") : QString());
+        notifyEntryChanged(entryIndex == m_currentIndex || previousIndex != m_currentIndex);
+        if (episodes.isEmpty()) emit errorOccurred(m_lastError);
+        return !episodes.isEmpty();
+    }
     if (episodes.isEmpty())
     {
         const bool reportAsynchronousFailure = entry.source.startsWith(
@@ -1790,6 +2012,9 @@ void EpisodeFolder::loadLibrary()
         entry.type = jsonString(object, "type");
         entry.source = jsonString(object, "source");
         entry.folder = jsonString(object, "folder");
+        entry.torrentIds = jsonStringList(object.value("torrentIds"));
+        entry.torrentSources = jsonStringList(object.value("torrentSources"));
+        entry.episodeTorrentIds = jsonStringList(object.value("episodeTorrentIds"));
         entry.relativePaths = jsonStringList(object.value("episodes"));
         entry.episodeSizes = jsonIntegerList(object.value("episodeSizes"));
         entry.torrentFileIndices = jsonIntList(
@@ -1810,6 +2035,27 @@ void EpisodeFolder::loadLibrary()
             m_entries.size() >= MAX_LIBRARY_ENTRIES)
         {
             continue;
+        }
+        if (!entry.torrentIds.isEmpty())
+        {
+            if (entry.type != "torrent" || entry.torrentIds.size() > 100 ||
+                entry.torrentIds.size() != entry.torrentSources.size() ||
+                entry.episodeTorrentIds.size() != entry.relativePaths.size() ||
+                entry.episodeSizes.size() != entry.relativePaths.size() ||
+                entry.torrentFileIndices.size() != entry.relativePaths.size()) continue;
+            QSet<QString> members;
+            bool valid = true;
+            for (const QString &member : entry.torrentIds)
+            {
+                if (member.isEmpty() || members.contains(member) || findEntryById(member) >= 0)
+                    valid = false;
+                members.insert(member);
+            }
+            for (int episode = 0; episode < entry.relativePaths.size(); ++episode)
+                if (!members.contains(entry.episodeTorrentIds.at(episode)) ||
+                    !entry.relativePaths.at(episode).startsWith(entry.episodeTorrentIds.at(episode) + '/'))
+                    valid = false;
+            if (!valid) continue;
         }
         if (entry.type == "folder")
         {
@@ -1840,6 +2086,15 @@ void EpisodeFolder::loadLibrary()
             continue;
         }
 
+        if (!m_entries.at(index).torrentIds.isEmpty())
+        {
+            const Entry &entry = m_entries.at(index);
+            for (int member = 0; member < entry.torrentIds.size(); ++member)
+                static_cast<void>(m_torrentEngine->restore(
+                    entry.torrentIds.at(member), entry.torrentSources.at(member)));
+            ++index;
+            continue;
+        }
         const QString oldId = m_entries.at(index).id;
         const TorrentEngine::AddResult result = m_torrentEngine->restore(
             oldId, m_entries.at(index).source
@@ -2009,6 +2264,9 @@ bool EpisodeFolder::writeLibrary() const
             {"type", entry.type},
             {"source", entry.source},
             {"folder", entry.folder},
+            {"torrentIds", QJsonArray::fromStringList(entry.torrentIds)},
+            {"torrentSources", QJsonArray::fromStringList(entry.torrentSources)},
+            {"episodeTorrentIds", QJsonArray::fromStringList(entry.episodeTorrentIds)},
             {"episodes", QJsonArray::fromStringList(entry.relativePaths)},
             {"episodeSizes", QJsonArray::fromVariantList([&entry]() {
                 QVariantList values;
@@ -2110,14 +2368,21 @@ QVariantMap EpisodeFolder::playbackInfo(const QString &file) const
     const int entry = findEntryForFile(file, &episode);
     if (entry < 0 || episode < 0) return {};
     const Entry &item = m_entries.at(entry);
+    const QStringList names = episodeNamesForKey(item.id);
     return {{"key", item.id}, {"title", item.title},
-        {"filename", item.relativePaths.at(episode)}, {"siblings", item.relativePaths}};
+        {"filename", names.at(episode)}, {"siblings", names}};
 }
 
 QStringList EpisodeFolder::episodeNamesForKey(const QString &key) const
 {
     const int index = findEntryById(key);
-    return index < 0 ? QStringList{} : m_entries.at(index).relativePaths;
+    if (index < 0) return {};
+    const Entry &entry = m_entries.at(index);
+    QStringList names = entry.relativePaths;
+    if (!entry.torrentIds.isEmpty())
+        for (int row = 0; row < names.size(); ++row)
+            names[row] = names.at(row).sliced(entry.ownerId(row).size() + 1);
+    return names;
 }
 
 QVariantMap EpisodeFolder::subtitleLinkForFile(const QString &file) const

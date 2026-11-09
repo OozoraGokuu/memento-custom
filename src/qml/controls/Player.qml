@@ -376,6 +376,19 @@ MpvPlayer {
     }
 
     Shortcut {
+        sequence: "Ctrl+Z"
+        autoRepeat: false
+        enabled: root.playerShortcutAllowed() && root.state.path.length > 0
+        onActivated: {
+            const info = EpisodeLibrary.playbackInfo(root.state.path);
+            const result = root.controller.saveScreenshot(
+                info.title || "", info.filename || root.state.path);
+            root.controller.showText(result.ok ?
+                qsTr("Screenshot saved: %1").arg(result.path) : result.error);
+        }
+    }
+
+    Shortcut {
         sequence: "Ctrl+X"
         autoRepeat: false
         enabled: root.playerShortcutAllowed() && root.state.path.length > 0

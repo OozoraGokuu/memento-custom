@@ -16,6 +16,35 @@ class SubtitleTests : public QObject
     Q_OBJECT
 
 private slots:
+    void playbackCounterFollowsTimeline()
+    {
+        SubtitleListModel model(nullptr);
+        model.setItems({{"one", 1, 2}, {"two", 4, 5}, {"three", 8, 10}});
+        QCOMPARE(model.playbackRow(), -1);
+        model.selectPosition(1);
+        QCOMPARE(model.playbackRow(), 0);
+        model.selectPosition(3); // Gaps keep the last reached line.
+        QCOMPARE(model.playbackRow(), 0);
+        model.selectPosition(4);
+        QCOMPARE(model.playbackRow(), 1);
+        model.selectPosition(20);
+        QCOMPARE(model.playbackRow(), 2);
+        model.selectPosition(1.1); // Scrubbing backwards resynchronizes.
+        QCOMPARE(model.playbackRow(), 0);
+        model.selectPosition(0);
+        QCOMPARE(model.playbackRow(), -1);
+        model.selectPosition(std::numeric_limits<double>::quiet_NaN());
+        QCOMPARE(model.playbackRow(), -1);
+        model.selectPosition(9);
+        model.setItems({{"replacement", 5, 6}});
+        QCOMPARE(model.playbackRow(), 0);
+        model.clear();
+        QCOMPARE(model.playbackRow(), -1);
+        model.selectPosition(8); // A timeline loaded after playback catches up.
+        model.setItems({{"one", 1, 2}, {"two", 4, 5}});
+        QCOMPARE(model.playbackRow(), 1);
+    }
+
     void adjacentNavigation()
     {
         SubtitleListModel model(nullptr);

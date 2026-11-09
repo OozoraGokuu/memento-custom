@@ -30,6 +30,10 @@
 #include <ranges>
 #include <vector>
 
+#include <QDateTime>
+#include <QRegularExpression>
+#include <QStandardPaths>
+#include <QUuid>
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -1125,6 +1129,48 @@ QVariantMap MpvController::copySubtitleScreenshot()
     mime->setImageData(capture.subtitleFrame);
     QGuiApplication::clipboard()->setMimeData(mime);
     return {{"ok", true}, {"text", capture.primaryText}};
+}
+
+QVariantMap MpvController::saveScreenshot(
+    const QString &libraryTitle, const QString &episodeName)
+{
+    const MpvFrameCapture capture = captureFrames(true, false);
+    if (capture.subtitleFrame.isNull())
+        return {{"ok", false}, {"error", tr("Could not capture the current video frame.")}};
+
+    const auto safeName = [](QString name, const QString &fallback) {
+        name.replace(QRegularExpression(QStringLiteral("[<>:\"/\\\\|?*\\x00-\\x1f]")), "_");
+        name = name.trimmed().left(100);
+        while (name.endsWith('.') || name.endsWith(' ')) name.chop(1);
+        if (name.isEmpty() || name == "." || name == "..") name = fallback;
+        static const QRegularExpression reserved(
+            "^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",
+            QRegularExpression::CaseInsensitiveOption);
+        if (reserved.match(name).hasMatch()) name.prepend('_');
+        return name;
+    };
+    const QString pictures = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    if (pictures.isEmpty())
+        return {{"ok", false}, {"error", tr("The Pictures folder is unavailable.")}};
+    const QString folder = QDir(pictures).filePath(
+        "Memento/" + safeName(libraryTitle, tr("Unsorted")));
+    if (!QDir().mkpath(folder))
+        return {{"ok", false}, {"error", tr("Could not create the screenshot folder: %1").arg(folder)}};
+    const QString filename = safeName(QFileInfo(episodeName).completeBaseName(), "Screenshot") +
+        QString("_%1s_%2_%3.png")
+            .arg(capture.position, 0, 'f', 3)
+            .arg(QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss"))
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces).left(8));
+    const QString path = QDir(folder).filePath(filename);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+        return {{"ok", false}, {"error", tr("Could not save the screenshot: %1").arg(file.errorString())}};
+    if (!capture.subtitleFrame.save(&file, "PNG") || !file.flush())
+    {
+        file.remove();
+        return {{"ok", false}, {"error", tr("Could not write the screenshot image.")}};
+    }
+    return {{"ok", true}, {"path", path}};
 }
 
 QImage MpvController::screenshotRawWithSubtitleVisibility(

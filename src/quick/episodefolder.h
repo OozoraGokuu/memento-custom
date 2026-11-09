@@ -71,6 +71,9 @@ public:
     /** Adds a magnet link. Episodes appear when its metadata arrives. */
     Q_INVOKABLE int addMagnet(const QString &magnet);
 
+    /** Combines distinct magnet sources into one named library item. */
+    Q_INVOKABLE int addMultipleMagnets(const QString &title, const QString &magnets);
+
     /** Sets or changes the downloaded content folder for an entry. */
     Q_INVOKABLE bool setContentFolder(int entryIndex, const QUrl &folderUrl);
 
@@ -84,7 +87,7 @@ public:
     Q_INVOKABLE QStringList open(const QUrl &folderUrl);
 
     /** Stable identity and original filename for a playing local/torrent episode. */
-    QVariantMap playbackInfo(const QString &file) const;
+    Q_INVOKABLE QVariantMap playbackInfo(const QString &file) const;
 
     /** Original episode names for a library entry, without starting a stream. */
     Q_INVOKABLE QStringList episodeNamesForKey(const QString &key) const;
@@ -123,6 +126,13 @@ private:
         QString type;
         QString source;
         QString folder;
+        QStringList torrentIds;
+        QStringList torrentSources;
+        QStringList episodeTorrentIds;
+        QStringList sourceIds() const { return torrentIds.isEmpty() ? QStringList{id} : torrentIds; }
+        QString ownerId(int episode) const {
+            return torrentIds.isEmpty() ? id : episodeTorrentIds.value(episode);
+        }
         QStringList relativePaths;
         QStringList resolvedPaths;
         QList<qint64> episodeSizes;
@@ -142,6 +152,9 @@ private:
     [[nodiscard]] int findEntryById(const QString &id) const;
     [[nodiscard]] int watchedCount(const Entry &entry) const noexcept;
     [[nodiscard]] int availableCount(const Entry &entry) const noexcept;
+    [[nodiscard]] QSet<QString> readyTorrentIds(const Entry &entry) const;
+    [[nodiscard]] QVariantMap torrentStatus(const Entry &entry) const;
+    static void sortTorrentEpisodes(Entry &entry);
     [[nodiscard]] QVariantMap entryMap(const Entry &entry, int index) const;
     [[nodiscard]] QStringList playableFiles(const Entry &entry) const;
     [[nodiscard]] bool selectCurrentIndex(int index);

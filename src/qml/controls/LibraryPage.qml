@@ -187,6 +187,10 @@ Page {
                         text: qsTr("Magnet Link…")
                         onTriggered: magnetDialog.open()
                     }
+                    Action {
+                        text: qsTr("Add Multiple Magnets…")
+                        onTriggered: multipleMagnetsDialog.open()
+                    }
                     MenuSeparator {}
                     Action {
                         text: qsTr("Episode Folder…")
@@ -733,6 +737,8 @@ Page {
             }
         }
     }
+
+    MultipleMagnetsDialog { id: multipleMagnetsDialog }
 
     Dialog {
         id: magnetDialog

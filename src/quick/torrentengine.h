@@ -49,6 +49,7 @@ public:
     ~TorrentEngine() override;
 
     [[nodiscard]] AddResult addTorrentFile(const QString &path);
+    [[nodiscard]] static AddResult inspectMagnet(const QString &magnet);
     [[nodiscard]] AddResult addMagnet(const QString &magnet);
     [[nodiscard]] AddResult restore(const QString &id, const QString &source);
     void removeTorrent(const QString &id, bool deleteFiles = false);
