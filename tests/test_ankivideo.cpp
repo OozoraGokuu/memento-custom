@@ -5,7 +5,6 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
-#include <QtEndian>
 #include <clocale>
 #include <limits>
 
@@ -246,10 +245,20 @@ private slots:
             const auto pcm = run(m_ffmpeg, {"-v", "error", "-ss", "0.3", "-i", output,
                 "-t", "0.5", "-ac", "1", "-ar", "16000", "-f", "s16le", "-"});
             QVERIFY(pcm.size() >= 15000);
+            QCOMPARE(pcm.size() % 2, 0);
             int rising = 0;
-            for (int i = 2; i + 1 < pcm.size(); i += 2)
-                if (qFromLittleEndian<qint16>(pcm.constData() + i - 2) <= 0 &&
-                    qFromLittleEndian<qint16>(pcm.constData() + i) > 0) ++rising;
+            int previous = 0;
+            for (qsizetype i = 0; i + 1 < pcm.size(); i += 2)
+            {
+                // Decode only the two checked bytes. Avoid Qt's unaligned
+                // pointer read, which MinGW can misdiagnose as an overread of
+                // QByteArray's empty storage when warnings are errors.
+                const int bits = static_cast<unsigned char>(pcm.at(i)) |
+                    (static_cast<unsigned char>(pcm.at(i + 1)) << 8);
+                const int sample = bits >= 0x8000 ? bits - 0x10000 : bits;
+                if (i > 0 && previous <= 0 && sample > 0) ++rising;
+                previous = sample;
+            }
             const double frequency = rising / (pcm.size() / 2.0 / 16000);
             QVERIFY2(std::abs(frequency - audioId * 440.0) < 15.0,
                 qPrintable(QString::number(frequency)));
