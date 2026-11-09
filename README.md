@@ -40,6 +40,7 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 - AniList title search and episode matching, and a media-library episode picker.
 - On X11, **Subtitle → Include Subtitles in Stream** controls whether text subtitles appear in a capture of Memento's window while they remain visible locally. Screen sharing and bitmap subtitle tracks cannot separate them.
 - Persistent media library for local folders and torrents, episode progress and watched state.
+- **Remembered subtitle releases:** choose a subtitle once from Jimaku, Kitsunekko, or **Subtitle → Add Subtitle…**. Each library episode remembers its exact file and timing offset. Later episodes load only a unique match from that same release/group (including language and subtitle variant); local files are matched in the chosen folder. Missing or ambiguous matches ask you to choose. Subtitle Search shows the saved release, an auto-load switch, and Unlink. Choices stay in your local library data.
 - Japanese subtitle search through **Jimaku** (your API key) and the online **AJATT Kitsunekko mirror** (no full mirror download). No OpenSubtitles integration.
 - Torrent RSS search using a **website/feed URL you supply**, seeder/newest sorting, magnet/torrent import and direct streaming of one selected episode. No search provider or mirror is preconfigured.
 - Optional Cloudflare DNS-over-HTTPS for torrent search, with system-DNS fallback.

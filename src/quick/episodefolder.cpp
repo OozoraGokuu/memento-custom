@@ -13,6 +13,7 @@
 #include "quick/episodefolder.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <QCollator>
 #include <QCryptographicHash>
@@ -123,6 +124,8 @@ QJsonObject readLibraryObject()
                     return false;
                 }
             }
+            if (entry.value("subtitleSelections").toObject().size() > MAX_EPISODES_PER_ENTRY)
+                return false;
         }
         return true;
     };
@@ -176,6 +179,77 @@ QStringList jsonStringList(const QJsonValue &value)
         }
     }
     return result;
+}
+
+QVariantMap safeSubtitleRule(const QVariantMap &source)
+{
+    QVariantMap result;
+    for (const QString &key : {QStringLiteral("sampleName"),
+            QStringLiteral("mode"), QStringLiteral("pattern")})
+    {
+        const QString value = source.value(key).toString();
+        if (!value.isEmpty() && value.size() <= 8192) result.insert(key, value);
+    }
+    for (const QString &key : {QStringLiteral("version"), QStringLiteral("episode")})
+        if (source.contains(key)) result.insert(key, source.value(key).toInt());
+    if (source.contains("valid")) result.insert("valid", source.value("valid").toBool());
+    return result;
+}
+
+// Persist only provider identity and subtitle metadata. Download URLs, headers,
+// tokens and API responses must never end up in the media library JSON.
+QVariantMap safeSubtitleMetadata(const QVariantMap &source, bool selection)
+{
+    QVariantMap result;
+    QStringList stringKeys{"provider", "name", "sha", "prefix", "preferredFile"};
+    if (selection) stringKeys.append({"filename", "fileSha", "archiveMember"});
+    for (const QString &key : stringKeys)
+    {
+        const QString value = source.value(key).toString();
+        if (!value.isEmpty() && value.size() <= 8192) result.insert(key, value);
+    }
+    const QString directory = source.value("directory").toString();
+    if (!directory.isEmpty() && directory.size() <= 8192 &&
+        QFileInfo(directory).isAbsolute() && !directory.contains(QChar::Null))
+        result.insert("directory", QDir::cleanPath(directory));
+    if (source.contains("autoLoad")) result.insert("autoLoad", source.value("autoLoad").toBool());
+    if (source.contains("entryId"))
+    {
+        bool ok = false;
+        const qint64 entryId = source.value("entryId").toLongLong(&ok);
+        if (ok) result.insert("entryId", entryId);
+    }
+    for (const QString &key : {QStringLiteral("episodeOffset"), QStringLiteral("episode")})
+    {
+        if (!source.contains(key)) continue;
+        bool ok = false;
+        const int value = source.value(key).toInt(&ok);
+        if (ok) result.insert(key, value);
+    }
+    for (const QString &key : {QStringLiteral("releaseRule"), QStringLiteral("memberRule")})
+    {
+        const QVariantMap rule = safeSubtitleRule(source.value(key).toMap());
+        if (!rule.isEmpty()) result.insert(key, rule);
+    }
+    if (selection)
+    {
+        const QString cachePath = source.value("cachePath").toString();
+        // Cache references are files on this device, never signed download URLs.
+        if (!cachePath.isEmpty() && cachePath.size() <= 8192 &&
+            QFileInfo(cachePath).isAbsolute() && !cachePath.contains(QChar::Null))
+            result.insert("cachePath", QDir::cleanPath(cachePath));
+        bool ok = false;
+        const double delay = source.value("delay").toDouble(&ok);
+        if (ok && std::isfinite(delay)) result.insert("delay", delay);
+    }
+    return result;
+}
+
+void mergeSubtitleSelections(QVariantMap &target, const QVariantMap &source)
+{
+    for (auto it = source.cbegin(); it != source.cend(); ++it)
+        if (!target.contains(it.key()) && target.size() < MAX_EPISODES_PER_ENTRY)
+            target.insert(it.key(), it.value());
 }
 
 QList<qint64> jsonIntegerList(const QJsonValue &value)
@@ -964,6 +1038,9 @@ int EpisodeFolder::addMultipleMagnets(const QString &title, const QString &magne
             collection.episodeTorrentIds.append(source.id);
             if (entry.watched.contains(entry.relativePaths.at(row))) collection.watched.insert(path);
             if (entry.lastPlayed == entry.relativePaths.at(row)) collection.lastPlayed = path;
+            if (entry.subtitleSelections.contains(entry.relativePaths.at(row)))
+                collection.subtitleSelections.insert(path,
+                    entry.subtitleSelections.value(entry.relativePaths.at(row)));
         }
     }
     sortTorrentEpisodes(collection);
@@ -1145,6 +1222,7 @@ QStringList EpisodeFolder::rescan(int entryIndex)
                 }
                 if (duplicate.audioTrack < 0) duplicate.audioTrack = entry.audioTrack;
                 if (duplicate.subtitleLink.isEmpty()) duplicate.subtitleLink = entry.subtitleLink;
+                mergeSubtitleSelections(duplicate.subtitleSelections, entry.subtitleSelections);
                 duplicate.source = result.source;
 
                 const bool removedCurrent = m_currentIndex == index;
@@ -1996,7 +2074,8 @@ bool EpisodeFolder::updateTorrentMetadata(
 void EpisodeFolder::loadLibrary()
 {
     const QJsonObject root = readLibraryObject();
-    m_lastSubtitleSearch = root.value("lastSubtitleSearch").toObject().toVariantMap();
+    m_lastSubtitleSearch = safeSubtitleMetadata(
+        root.value("lastSubtitleSearch").toObject().toVariantMap(), false);
     QString currentId = root.value("currentId").toString();
     const QJsonArray storedEntries = root.value("entries").toArray();
     for (const QJsonValue &value : storedEntries)
@@ -2023,7 +2102,15 @@ void EpisodeFolder::loadLibrary()
         const QStringList watched = jsonStringList(object.value("watched"));
         entry.watched = QSet<QString>(watched.cbegin(), watched.cend());
         entry.lastPlayed = jsonString(object, "lastPlayed");
-        entry.subtitleLink = object.value("subtitleLink").toObject().toVariantMap();
+        entry.subtitleLink = safeSubtitleMetadata(
+            object.value("subtitleLink").toObject().toVariantMap(), false);
+        const QJsonObject selections = object.value("subtitleSelections").toObject();
+        for (auto it = selections.constBegin(); it != selections.constEnd(); ++it)
+        {
+            if (it.key().isEmpty() || it.key().size() > 8192) continue;
+            const QVariantMap selection = safeSubtitleMetadata(it.value().toObject().toVariantMap(), true);
+            if (!selection.isEmpty()) entry.subtitleSelections.insert(it.key(), selection);
+        }
         entry.audioTrack = object.value("audioTrack").toInt(-1);
 
         if (entry.id.isEmpty() || entry.title.isEmpty() ||
@@ -2120,6 +2207,7 @@ void EpisodeFolder::loadLibrary()
             }
             if (existing.audioTrack < 0) existing.audioTrack = m_entries.at(index).audioTrack;
             if (existing.subtitleLink.isEmpty()) existing.subtitleLink = m_entries.at(index).subtitleLink;
+            mergeSubtitleSelections(existing.subtitleSelections, m_entries.at(index).subtitleSelections);
             existing.source = result.source;
             m_entries.removeAt(index);
             migratedTorrent = true;
@@ -2289,6 +2377,7 @@ bool EpisodeFolder::writeLibrary() const
             {"watched", QJsonArray::fromStringList(watched)},
             {"lastPlayed", entry.lastPlayed},
             {"subtitleLink", QJsonObject::fromVariantMap(entry.subtitleLink)},
+            {"subtitleSelections", QJsonObject::fromVariantMap(entry.subtitleSelections)},
             {"audioTrack", entry.audioTrack},
         });
     }
@@ -2397,8 +2486,9 @@ bool EpisodeFolder::setSubtitleLinkForFile(const QString &file, const QVariantMa
     if (index < 0) return false;
     Entry &entry = m_entries[index];
     const QVariantMap previous = entry.subtitleLink;
-    if (previous == link) return true;
-    entry.subtitleLink = link;
+    const QVariantMap safeLink = safeSubtitleMetadata(link, false);
+    if (previous == safeLink) return true;
+    entry.subtitleLink = safeLink;
     if (!writeLibrary())
     {
         entry.subtitleLink = previous;
@@ -2411,13 +2501,105 @@ bool EpisodeFolder::setSubtitleLinkForFile(const QString &file, const QVariantMa
 
 bool EpisodeFolder::clearSubtitleLinkForFile(const QString &file)
 {
-    return setSubtitleLinkForFile(file, {});
+    const int index = findEntryForFile(file, nullptr);
+    if (index < 0) return false;
+    Entry &entry = m_entries[index];
+    if (entry.subtitleLink.isEmpty() && entry.subtitleSelections.isEmpty()) return true;
+    const QVariantMap previousLink = entry.subtitleLink;
+    const QVariantMap previousSelections = entry.subtitleSelections;
+    entry.subtitleLink.clear();
+    entry.subtitleSelections.clear();
+    if (!writeLibrary())
+    {
+        entry.subtitleLink = previousLink;
+        entry.subtitleSelections = previousSelections;
+        reportPersistenceError();
+        return false;
+    }
+    setLastError({});
+    notifyEntryChanged(true);
+    return true;
+}
+
+QVariantMap EpisodeFolder::subtitleSelectionForFile(const QString &file) const
+{
+    int episode = -1;
+    const int index = findEntryForFile(file, &episode);
+    if (index < 0 || episode < 0) return {};
+    const Entry &entry = m_entries.at(index);
+    return entry.subtitleSelections.value(entry.relativePaths.at(episode)).toMap();
+}
+
+bool EpisodeFolder::rememberSubtitleSelection(const QString &file,
+    const QVariantMap &link, const QVariantMap &selection)
+{
+    int episode = -1;
+    const int index = findEntryForFile(file, &episode);
+    if (index < 0 || episode < 0) return false;
+    const QVariantMap safeLink = safeSubtitleMetadata(link, false);
+    const QVariantMap safeSelection = safeSubtitleMetadata(selection, true);
+    if (safeLink.value("provider").toString().isEmpty() ||
+        safeSelection.value("provider").toString().isEmpty() ||
+        safeSelection.value("filename").toString().isEmpty()) return false;
+    Entry &entry = m_entries[index];
+    const QString key = entry.relativePaths.at(episode);
+    if (!entry.subtitleSelections.contains(key) &&
+        entry.subtitleSelections.size() >= MAX_EPISODES_PER_ENTRY) return false;
+    if (entry.subtitleLink == safeLink &&
+        entry.subtitleSelections.value(key).toMap() == safeSelection) return true;
+    const QVariantMap previousLink = entry.subtitleLink;
+    const QVariantMap previousSelections = entry.subtitleSelections;
+    entry.subtitleLink = safeLink;
+    entry.subtitleSelections.insert(key, safeSelection);
+    if (!writeLibrary())
+    {
+        entry.subtitleLink = previousLink;
+        entry.subtitleSelections = previousSelections;
+        reportPersistenceError();
+        return false;
+    }
+    setLastError({});
+    notifyEntryChanged(true);
+    return true;
+}
+
+bool EpisodeFolder::updateSubtitleSelectionDelay(const QString &file,
+    const QString &cachePath, double delay)
+{
+    if (cachePath.isEmpty() || !std::isfinite(delay)) return false;
+    int episode = -1;
+    const int index = findEntryForFile(file, &episode);
+    if (index < 0 || episode < 0) return false;
+    Entry &entry = m_entries[index];
+    const QString key = entry.relativePaths.at(episode);
+    const QVariantMap previous = entry.subtitleSelections.value(key).toMap();
+    const QString rememberedPath = previous.value("cachePath").toString();
+    if (rememberedPath.isEmpty()) return false;
+#if defined(Q_OS_WIN)
+    if (normalizedPath(rememberedPath).compare(normalizedPath(cachePath), Qt::CaseInsensitive) != 0)
+#else
+    if (normalizedPath(rememberedPath) != normalizedPath(cachePath))
+#endif
+        return false;
+    if (previous.contains("delay") && previous.value("delay").toDouble() == delay) return true;
+    QVariantMap updated = previous;
+    updated.insert("delay", delay);
+    entry.subtitleSelections.insert(key, updated);
+    if (!writeLibrary())
+    {
+        entry.subtitleSelections.insert(key, previous);
+        reportPersistenceError();
+        return false;
+    }
+    setLastError({});
+    notifyEntryChanged(true);
+    return true;
 }
 
 bool EpisodeFolder::rememberSubtitleSearch(const QVariantMap &link, int episode)
 {
     const auto previous = m_lastSubtitleSearch;
-    m_lastSubtitleSearch = link;
+    m_lastSubtitleSearch = safeSubtitleMetadata(link, false);
     m_lastSubtitleSearch.insert("episode", episode);
     if (!writeLibrary()) { m_lastSubtitleSearch = previous; reportPersistenceError(); return false; }
     emit libraryChanged();

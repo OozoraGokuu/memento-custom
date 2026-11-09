@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
 #include <QScopeGuard>
@@ -22,9 +23,21 @@
 #include <zip.h>
 
 #include "jimaku/jimakuclient.h"
+#include "jimaku/subtitlerelease.h"
 
 namespace
 {
+
+QJsonObject subtitleFile(const QString &name, const QString &url)
+{
+    return {{"name", name}, {"size", 1024}, {"url", url}};
+}
+
+QVariantMap releaseLink(const QString &name, int episode)
+{
+    return {{"provider", "jimaku"}, {"name", "Chosen Show"}, {"entryId", 123},
+        {"preferredFile", name}, {"releaseRule", SubtitleRelease::fromFile(name, episode)}};
+}
 
 bool createArchive(
     const QString &path,
@@ -106,7 +119,7 @@ private slots:
             QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test");
         }
         QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
-        const QVariantMap link = {{"provider", "jimaku"}, {"name", "Chosen Show"}, {"entryId", 123}};
+        const QVariantMap link = releaseLink("[Selected] Show - 23.ass", 23);
         QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(folder.filePath("Show - 23.mkv"), link));
         const QString next = folder.filePath("Show - 24.mkv");
         QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(next), link);
@@ -121,7 +134,179 @@ private slots:
         QVERIFY(client.m_operation == JimakuClient::Operation::Fetch);
         QCOMPARE(client.m_media.path, next);
         QCOMPARE(client.selectedEntryName(), QString("Chosen Show"));
+        QCOMPARE(client.m_activeLink, link);
         client.cancel();
+        context.setPlayer(nullptr);
+    }
+
+    void titleLinkWithoutReleaseDoesNotGuessAGroup()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        const QString path = folder.filePath("Show - 24.mkv");
+        QFile media(path);
+        QVERIFY(media.open(QIODevice::WriteOnly)); media.write("test"); media.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const QVariantMap link{{"provider", "jimaku"}, {"name", "Chosen Show"}, {"entryId", 123}};
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(path, link));
+        player.state()->setPath(path);
+
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl("http://127.0.0.1:1");
+        QSignalSpy failed(&client, &JimakuClient::failed);
+        client.fetchForCurrentMedia();
+
+        QCOMPARE(failed.count(), 1);
+        QVERIFY(!client.busy());
+        QVERIFY(!client.m_reply);
+        QVERIFY(client.status().contains("Choose a subtitle file"));
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), link);
+        context.setPlayer(nullptr);
+    }
+
+    void browsingSameTitlePreservesReleaseChoice()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        const QString path = folder.filePath("Show - 24.mkv");
+        QFile media(path);
+        QVERIFY(media.open(QIODevice::WriteOnly)); media.write("test"); media.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        auto link = releaseLink("[Selected] Show - 23.ass", 23);
+        link.insert("episodeOffset", 12);
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(path, link));
+        player.state()->setPath(path);
+
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl("http://127.0.0.1:1");
+        client.setSearchEntries({QJsonObject{{"id", 123}, {"name", "Chosen Show"}}});
+        client.selectEntry(0, 24);
+        QCOMPARE(client.m_selectedLink, link);
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), link);
+        client.cancel();
+        client.selectEntryAllFiles(0, 24);
+        QCOMPARE(client.m_selectedLink, link);
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), link);
+        client.cancel();
+        // Merely inspecting another title must not replace the working group.
+        // Its new identity becomes active only after a file is attached.
+        client.setSearchEntries({QJsonObject{{"id", 456}, {"name", "Another Show"}}});
+        client.selectEntry(0, 24);
+        QCOMPARE(client.m_selectedLink.value("entryId").toLongLong(), qint64(456));
+        QVERIFY(client.m_selectedLink.value("releaseRule").toMap().isEmpty());
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), link);
+        client.cancel();
+        context.setPlayer(nullptr);
+    }
+
+    void savedEpisodeChoiceTakesPrecedenceOverSeriesRelease()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        const QString path = folder.filePath("Show - 24.mkv");
+        QFile media(path);
+        QVERIFY(media.open(QIODevice::WriteOnly)); media.write("test"); media.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const auto series = releaseLink("[Usual] Show - 23.ass", 23);
+        auto selected = releaseLink("[Exception] Show - 24 [1234ABCD].ass", 24);
+        selected.insert("filename", "[Exception] Show - 24 [1234ABCD].ass");
+        selected.insert("episode", 24);
+        selected.insert("delay", 1.75);
+        selected.insert("cachePath", folder.filePath("missing-cached-subtitle.ass"));
+        QVERIFY(context.episodeLibrary()->rememberSubtitleSelection(path, series, selected));
+        player.state()->setPath(path);
+
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl("http://127.0.0.1:1");
+        client.fetchForCurrentMedia();
+        QCOMPARE(client.m_savedSelection, selected);
+        QCOMPARE(client.m_activeLink, selected);
+        const QJsonArray files{
+            subtitleFile("[Usual] Show - 24.ass", "/usual.ass"),
+            subtitleFile("[Exception] Show - 24 [DEADBEEF].ass", "/other-version.ass"),
+            subtitleFile("[Exception] Show - 24 [1234ABCD].ass", "/exact.ass")
+        };
+        QCOMPARE(client.selectFile(files).name, selected.value("filename").toString());
+        // A changed CRC is another file, even if it belongs to this release.
+        // Losing the exact saved choice must not silently substitute it.
+        QJsonArray missing = files;
+        missing.removeLast();
+        QVERIFY(client.selectFile(missing).name.isEmpty());
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), series);
+        client.cancel();
+        context.setPlayer(nullptr);
+    }
+
+    void missingOrAmbiguousReleaseStopsWithoutDownload_data()
+    {
+        QTest::addColumn<QJsonArray>("files");
+        QTest::newRow("missing") << QJsonArray{
+            subtitleFile("[Other] Show - 24.ass", "/other.ass"),
+            subtitleFile("[Selected] Show - 23.ass", "/old.ass")
+        };
+        QTest::newRow("ambiguous") << QJsonArray{
+            subtitleFile("[Other] Show - 24.ass", "/other.ass"),
+            subtitleFile("[Selected] Show - 24 [1234ABCD].ass", "/selected-a.ass"),
+            subtitleFile("[Selected] Show - 24 [DEADBEEF].ass", "/selected-b.ass")
+        };
+    }
+
+    void missingOrAmbiguousReleaseStopsWithoutDownload()
+    {
+        QFETCH(QJsonArray, files);
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        QTemporaryDir folder;
+        const QString path = folder.filePath("Show - 24.mkv");
+        QFile media(path);
+        QVERIFY(media.open(QIODevice::WriteOnly)); media.write("test"); media.close();
+        QVERIFY(context.episodeLibrary()->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const auto link = releaseLink("[Selected] Show - 23.ass", 23);
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(path, link));
+        player.state()->setPath(path);
+
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QByteArray body = QJsonDocument(files).toJson(QJsonDocument::Compact);
+        QStringList requests;
+        connect(&server, &QTcpServer::newConnection, &server, [&server, &requests, body] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [socket, &requests, body] {
+                QByteArray request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n") || socket->property("answered").toBool()) return;
+                socket->setProperty("answered", true);
+                requests.append(QString::fromUtf8(request.split('\n').first()).trimmed());
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        });
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        QSignalSpy failed(&client, &JimakuClient::failed);
+        client.fetchForCurrentMedia();
+        QTRY_COMPARE(failed.count(), 1);
+
+        QVERIFY(!client.busy());
+        QVERIFY(client.m_file.name.isEmpty());
+        QVERIFY(client.status().contains("missing or ambiguous"));
+        QCOMPARE(requests, QStringList({"GET /api/entries/123/files?episode=24 HTTP/1.1",
+                                       "GET /api/entries/123/files HTTP/1.1"}));
+        QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(path), link);
+        QVERIFY(context.episodeLibrary()->subtitleSelectionForFile(path).isEmpty());
         context.setPlayer(nullptr);
     }
 
@@ -252,6 +437,37 @@ private slots:
         QString error;
         QVERIFY(client.extractZip(archivePath, &error).isEmpty());
         QVERIFY(!error.isEmpty());
+    }
+
+    void rejectsMultipleNumberedReleasesInsideArchive()
+    {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString archivePath = directory.filePath("multiple-releases.zip");
+        QVERIFY(createArchive(archivePath, {
+            {QByteArrayLiteral("[Other] Show - 03.ass"), QByteArrayLiteral("other group")},
+            {QByteArrayLiteral("[Selected] Show - 03.ass"), QByteArrayLiteral("selected group")},
+            {QByteArrayLiteral("[Selected] Show - 02.ass"), QByteArrayLiteral("wrong episode")},
+        }));
+
+        JimakuClient client(nullptr);
+        client.m_media.episode = 3;
+        QString error;
+        QVERIFY(client.extractZip(archivePath, &error).isEmpty());
+        QVERIFY(error.contains("multiple subtitle releases"));
+
+        // A previously selected member identifies its group for the next
+        // episode, even when a batch also contains other groups.
+        client.m_activeLink.insert("memberRule",
+            SubtitleRelease::fromFile("[Selected] Show - 02.ass", 2));
+        error.clear();
+        const QString extracted = client.extractZip(archivePath, &error);
+        QVERIFY2(!extracted.isEmpty(), qPrintable(error));
+        QFile subtitle(extracted);
+        QVERIFY(subtitle.open(QIODevice::ReadOnly));
+        QCOMPARE(subtitle.readAll(), QByteArrayLiteral("selected group"));
+        subtitle.close();
+        QVERIFY(QFile::remove(extracted));
     }
 
     void rejectsBatchArchiveWithoutTheRequestedEpisode()
@@ -559,6 +775,34 @@ private slots:
             client.selectFile(withCorrect, true).name,
             QStringLiteral("Series - 03.srt")
         );
+    }
+
+    void automaticSelectionUsesOnlyUniqueChosenRelease()
+    {
+        JimakuClient client(nullptr);
+        client.m_media.episode = 24;
+        client.m_activeLink = releaseLink("[Selected] Show - 23.ja.srt", 23);
+        const QJsonArray files{
+            subtitleFile("[Other] Show - 24.ja.ass", "/other.ass"),
+            subtitleFile("[Selected] Show - 24.ja.signs.srt", "/signs.srt"),
+            subtitleFile("[Selected] Show - 24.en.srt", "/english.srt"),
+            subtitleFile("[Selected] Show - 23.ja.srt", "/old.srt"),
+            subtitleFile("[Selected] Show - 24.ja.srt", "/chosen.srt")
+        };
+        QCOMPARE(client.selectFile(files).name, QString("[Selected] Show - 24.ja.srt"));
+        QCOMPARE(client.selectFile(files, true).name, QString("[Selected] Show - 24.ja.srt"));
+
+        client.m_selectedLink = client.m_activeLink;
+        client.setBrowseFiles(client.usableFiles(files));
+        const int index = client.preferredFileIndex(24);
+        QVERIFY(index >= 0);
+        QCOMPARE(client.m_browseFiles.at(index).name, QString("[Selected] Show - 24.ja.srt"));
+
+        QJsonArray ambiguous = files;
+        ambiguous.append(subtitleFile("[Selected] Show - 24 [1234ABCD].ja.srt", "/duplicate.srt"));
+        QVERIFY(client.selectFile(ambiguous).name.isEmpty());
+        client.setBrowseFiles(client.usableFiles(ambiguous));
+        QCOMPARE(client.preferredFileIndex(24), -1);
     }
 };
 

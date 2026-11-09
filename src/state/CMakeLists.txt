@@ -2,6 +2,8 @@ add_library(
     context
     context.cpp
     context.h
+    localsubtitleclient.cpp
+    localsubtitleclient.h
     immersionstats.cpp
     immersionstats.h
     lookuphistory.cpp

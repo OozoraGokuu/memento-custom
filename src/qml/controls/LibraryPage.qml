@@ -620,21 +620,25 @@ Page {
 
                 required property var modelData
                 required property int index
+                readonly property var episode: modelData || ({
+                    title: "", relativePath: "", path: "", number: "", size: 0,
+                    available: false, watched: false
+                })
 
                 readonly property bool searchMatch:
                     !episodeSearch.visible || episodeSearch.text.length === 0 ||
-                    modelData.title.toLowerCase().includes(
+                    episodeDelegate.episode.title.toLowerCase().includes(
                         episodeSearch.text.toLowerCase()) ||
-                    modelData.relativePath.toLowerCase().includes(
+                    episodeDelegate.episode.relativePath.toLowerCase().includes(
                         episodeSearch.text.toLowerCase()) ||
-                    String(modelData.number).includes(episodeSearch.text)
-                readonly property bool playing: modelData.path.length > 0 &&
-                    root.player.state.path === modelData.path
+                    String(episodeDelegate.episode.number).includes(episodeSearch.text)
+                readonly property bool playing: episodeDelegate.episode.path.length > 0 &&
+                    root.player.state.path === episodeDelegate.episode.path
 
                 width: ListView.view.width
                 height: searchMatch ? 52 : 0
                 visible: searchMatch
-                enabled: modelData.available
+                enabled: episodeDelegate.episode.available
                 leftPadding: 8
                 rightPadding: 6
                 highlighted: playing
@@ -655,7 +659,7 @@ Page {
                     Label {
                         Layout.preferredWidth: 30
                         horizontalAlignment: Text.AlignRight
-                        text: modelData.number
+                        text: episodeDelegate.episode.number
                         color: episodeDelegate.playing ?
                             MementoPalette.accent : MementoPalette.placeholderText
                         font.bold: episodeDelegate.playing
@@ -668,10 +672,10 @@ Page {
                         Label {
                             Layout.fillWidth: true
                             text: (episodeDelegate.playing ? "▶  " : "") +
-                                modelData.title
+                                episodeDelegate.episode.title
                             textFormat: Text.PlainText
                             font.bold: episodeDelegate.playing
-                            font.strikeout: modelData.watched
+                            font.strikeout: episodeDelegate.episode.watched
                             elide: Text.ElideMiddle
                         }
 
@@ -681,8 +685,8 @@ Page {
 
                             Label {
                                 Layout.fillWidth: true
-                                visible: modelData.relativePath !== modelData.title
-                                text: modelData.relativePath
+                                visible: episodeDelegate.episode.relativePath !== episodeDelegate.episode.title
+                                text: episodeDelegate.episode.relativePath
                                 textFormat: Text.PlainText
                                 color: MementoPalette.placeholderText
                                 font.pixelSize: 9
@@ -690,8 +694,8 @@ Page {
                             }
 
                             Label {
-                                visible: modelData.size > 0
-                                text: root.formatSize(modelData.size)
+                                visible: episodeDelegate.episode.size > 0
+                                text: root.formatSize(episodeDelegate.episode.size)
                                 color: MementoPalette.placeholderText
                                 font.pixelSize: 9
                             }
@@ -699,7 +703,7 @@ Page {
                     }
 
                     Label {
-                        visible: !modelData.available
+                        visible: !episodeDelegate.episode.available
                         text: EpisodeLibrary.currentEntry.type === "torrent" ?
                             qsTr("LOADING") : qsTr("MISSING")
                         color: MementoPalette.placeholderText
@@ -708,7 +712,7 @@ Page {
                     }
 
                     CheckBox {
-                        checked: modelData.watched
+                        checked: episodeDelegate.episode.watched
                         enabled: true
                         focusPolicy: Qt.NoFocus
                         onClicked: EpisodeLibrary.setEpisodeWatched(index, checked)

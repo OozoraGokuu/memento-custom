@@ -98,6 +98,15 @@ public:
     Q_INVOKABLE bool setDefaultAudioTrackForFile(const QString &file, int track);
     Q_INVOKABLE QVariantMap subtitleLinkForFile(const QString &file) const;
     Q_INVOKABLE bool setSubtitleLinkForFile(const QString &file, const QVariantMap &link);
+    /** Exact, confirmed subtitle choice for this episode, independent of the series preference. */
+    Q_INVOKABLE QVariantMap subtitleSelectionForFile(const QString &file) const;
+    /** Commits the series preference and this episode's choice together. */
+    Q_INVOKABLE bool rememberSubtitleSelection(const QString &file,
+        const QVariantMap &link, const QVariantMap &selection);
+    /** Updates an episode offset only for its currently remembered external subtitle. */
+    Q_INVOKABLE bool updateSubtitleSelectionDelay(const QString &file,
+        const QString &cachePath, double delay);
+    /** Forgets the series preference and every remembered choice in that series. */
     Q_INVOKABLE bool clearSubtitleLinkForFile(const QString &file);
 
     Q_INVOKABLE bool containsFile(const QString &file) const;
@@ -140,6 +149,7 @@ private:
         QSet<QString> watched;
         QString lastPlayed;
         QVariantMap subtitleLink;
+        QVariantMap subtitleSelections;
         int audioTrack{-1};
     };
 

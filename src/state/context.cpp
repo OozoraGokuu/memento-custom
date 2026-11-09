@@ -19,6 +19,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include "state/context.h"
+#include "player/mpvtrack.h"
 
 Context::Context(QObject *parent) : QObject(parent)
 {
@@ -97,7 +98,29 @@ MpvPlayer *Context::player() const noexcept
 
 void Context::setPlayer(MpvPlayer *player) noexcept
 {
+    QObject::disconnect(m_subtitleDelayConnection);
+    QObject::disconnect(m_subtitleMediaConnection);
     m_player = player;
     m_aniListClient->attachPlayer(player);
     m_immersionStats->attachPlayer(player);
+    if (player)
+    {
+        m_subtitleMediaConnection = connect(player->state(), &MpvState::pathChanged,
+            this, [this] {
+                m_jimakuClient->cancel();
+                m_kitsunekkoClient->cancel();
+                m_localSubtitleClient->cancel();
+            });
+        m_subtitleDelayConnection = connect(player->state()->subtitle(), &MpvSubtitle::delayChanged,
+            this, [this, player](double delay) {
+                for (const auto *track : player->state()->subtitleTracks())
+                {
+                    if (!track || track->id() != player->state()->sid() || !track->external()) continue;
+                    const QUrl url(track->externalFilename());
+                    m_episodeLibrary->updateSubtitleSelectionDelay(player->state()->path(),
+                        url.isLocalFile() ? url.toLocalFile() : track->externalFilename(), delay);
+                    break;
+                }
+            });
+    }
 }

@@ -133,7 +133,7 @@ Page {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
                                 color: MementoPalette.placeholderText
-                                text: qsTr("When an episode starts, use its linked Jimaku or Kitsunekko title automatically. Without a link, search Jimaku.")
+                                text: qsTr("When an episode starts, restore its saved subtitle or find the next file from the chosen release in Jimaku, Kitsunekko, or a local folder. Without a link, search Jimaku.")
                             }
                         }
 

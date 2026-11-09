@@ -38,6 +38,7 @@
 #include "setting/settings.h"
 #include "state/immersionstats.h"
 #include "state/lookuphistory.h"
+#include "state/localsubtitleclient.h"
 #include "state/videoexporter.h"
 #include "subtitle/subtitlelists.h"
 #include "util/utils.h"
@@ -126,6 +127,7 @@ public:
     [[nodiscard]]
     JimakuClient *jimakuClient() const noexcept;
     KitsunekkoClient *kitsunekkoClient() const noexcept { return m_kitsunekkoClient; }
+    LocalSubtitleClient *localSubtitleClient() const noexcept { return m_localSubtitleClient; }
 
     /**
      * @brief Get the Migaku media-export client.
@@ -202,6 +204,7 @@ private:
     /* The Jimaku subtitle downloader. Has ownership. */
     JimakuClient *m_jimakuClient{new JimakuClient(this, this)};
     KitsunekkoClient *m_kitsunekkoClient{new KitsunekkoClient(this, this)};
+    LocalSubtitleClient *m_localSubtitleClient{new LocalSubtitleClient(this, this)};
 
     VideoExporter *m_videoExporter{new VideoExporter(this, this)};
 
@@ -216,4 +219,6 @@ private:
 
     /* The main application MpvPlayer. Does not have ownership. */
     MpvPlayer *m_player{nullptr};
+    QMetaObject::Connection m_subtitleDelayConnection;
+    QMetaObject::Connection m_subtitleMediaConnection;
 };

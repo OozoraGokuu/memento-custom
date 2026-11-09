@@ -5,6 +5,7 @@
 #include <QTimer>
 #include <QNetworkAccessManager>
 #include <QPointer>
+#include <QDateTime>
 #include <functional>
 class QNetworkReply;
 
@@ -36,6 +37,7 @@ public:
     Q_INVOKABLE void openLinkedEntry(const QVariantMap &link, int episode, bool all = false);
     Q_INVOKABLE void selectEntryAllFiles(int index, int episode);
     Q_INVOKABLE void attachResult(int index);
+    Q_INVOKABLE int preferredFileIndex(int episode) const;
     Q_INVOKABLE void clearSearch();
     Q_INVOKABLE void cancel();
 signals:
@@ -46,21 +48,39 @@ private:
     friend class KitsunekkoClientTest;
     void get(const QUrl &url, std::function<void(const QByteArray &)> done);
     void loadCategory(int index);
+    bool loadCachedCatalog();
+    void startCatalogLoad();
+    void resolveLinkedCatalog(const QVariantMap &link, int episode, bool force = false);
+    void finishLinkedCatalog(bool fresh);
     void filterTitles();
     static QVariantList parseFiles(const QByteArray &data, const QString &prefix, int episode);
-    void selectFiles(int index, int episode, bool all, bool persist = true, bool automatic = false);
-    static int automaticFileIndex(const QVariantList &files, int episode);
+    void selectFiles(int index, int episode, bool all, bool persist = true,
+                     bool automatic = false, bool catalogFresh = false);
+    static int automaticFileIndex(const QVariantList &files, int episode,
+                                 const QVariantMap &rule,
+                                 const QString &exactFilename = {});
+    void attachResult(int index, bool automatic);
+    void attachPath(const QString &path, const QVariantMap &file, bool automatic);
+    QVariantMap exactSelection(int episode) const;
+    void watchMedia();
     void checkAttached();
     void error(const QString &message);
     Context *m_context;
     QString m_status, m_entryName, m_mediaPath, m_pendingPath, m_query;
     QVariantList m_catalog, m_catalogBuild, m_categories;
+    QDateTime m_catalogFetched;
+    QVariantMap m_catalogLink;
+    int m_catalogEpisode{-1};
     QNetworkAccessManager m_manager;
     QPointer<QNetworkReply> m_reply;
     QVariantList m_entries, m_files;
+    QVariantMap m_entryLink, m_pendingFile, m_pendingSelection;
     int m_episode{-1};
     quint64 m_generation{0};
     bool m_busy{false};
+    bool m_pendingAutomatic{false};
     QTimer m_attachTimer;
     QMetaObject::Connection m_trackConnection;
+    QMetaObject::Connection m_sidConnection;
+    QMetaObject::Connection m_mediaConnection;
 };

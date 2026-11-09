@@ -55,7 +55,7 @@ Dialog {
 
     function openNextEpisode() {
         const previous = EpisodeLibrary.lastSubtitleSearch;
-        if (!previous.provider || previous.episode < 0) return;
+        if ((previous.provider !== "jimaku" && previous.provider !== "kitsunekko") || previous.episode < 0) return;
         root.openForCurrentMedia();
         root.savedLink = previous;
         providerBox.currentIndex = previous.provider === "jimaku" ? 0 : 1;
@@ -68,11 +68,9 @@ Dialog {
     function attachNextIfUnambiguous() {
         if (!root.attachNextWhenReady || root.client.busy) return;
         root.attachNextWhenReady = false;
-        const files = root.client.fileResults;
-        let matches = [];
-        for (let i = 0; i < files.length; ++i)
-            if (files[i].episode === episodeBox.value) matches.push(i);
-        if (matches.length === 1) root.client.attachResult(matches[0]);
+        const index = root.client.preferredFileIndex(episodeBox.value);
+        if (index >= 0) root.client.attachResult(index);
+        else errorLabel.text = qsTr("No single file matches your saved release for this episode. Choose a file below.");
     }
 
     function saveKeyAndTest() {
@@ -176,6 +174,7 @@ Dialog {
             }
             Button {
                 text: qsTr("Browse episode subtitles")
+                visible: root.savedLink.provider !== "local"
                 enabled: !root.client.busy
                 onClicked: {
                     JimakuClient.cancel(); KitsunekkoClient.cancel();
@@ -203,6 +202,39 @@ Dialog {
                     root.client.clearSearch();
                 }
             }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            visible: !!root.savedLink.preferredFile
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Saved release: %1").arg(root.savedLink.preferredFile || "")
+                textFormat: Text.PlainText
+                elide: Text.ElideMiddle
+                ToolTip.visible: releaseHover.hovered
+                ToolTip.text: text
+                HoverHandler { id: releaseHover }
+            }
+            CheckBox {
+                text: qsTr("Auto-load this release")
+                checked: root.savedLink.autoLoad !== false
+                onClicked: {
+                    const updated = Object.assign({}, root.savedLink, { autoLoad: checked });
+                    if (!EpisodeLibrary.setSubtitleLinkForFile(root.player.state.path, updated))
+                        errorLabel.text = qsTr("Could not save the subtitle preference.");
+                    root.refreshLink();
+                }
+            }
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: !!root.savedLink.preferredFile
+            text: JimakuClient.autoFetch
+                ? qsTr("Each episode remembers its chosen file and timing. New episodes use the same release only; missing or ambiguous matches require a choice.")
+                : qsTr("Automatic subtitle loading is switched off in Options → Jimaku Subtitles.")
+            color: MementoPalette.placeholderText
+            wrapMode: Text.Wrap
         }
 
         Frame {

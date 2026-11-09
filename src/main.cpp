@@ -200,6 +200,10 @@ static void registerQmlTypes(Context &context)
         MEMENTO_URI, 1, 0, "JimakuClient", context.jimakuClient()
     );
 
+    qmlRegisterSingletonInstance<LocalSubtitleClient>(
+        MEMENTO_URI, 1, 0, "LocalSubtitleClient", context.localSubtitleClient()
+    );
+
     qmlRegisterSingletonInstance<KitsunekkoClient>(
         MEMENTO_URI, 1, 0, "KitsunekkoClient", context.kitsunekkoClient()
     );

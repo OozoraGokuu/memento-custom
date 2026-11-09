@@ -2,6 +2,8 @@ add_library(
     jimaku
     jimakuclient.cpp
     jimakuclient.h
+    subtitlerelease.cpp
+    subtitlerelease.h
     kitsunekkoclient.cpp
     kitsunekkoclient.h
 )

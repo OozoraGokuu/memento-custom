@@ -976,7 +976,7 @@ MenuBar {
             qsTr("All Files (*.*)")
         ]
         title: qsTr("Select Subtitle File")
-        onAccepted: root.player.controller.loadSubtitle(selectedFile)
+        onAccepted: LocalSubtitleClient.loadFile(selectedFile.toString())
     }
 
     UpdateDialog {

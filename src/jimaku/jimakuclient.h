@@ -84,6 +84,7 @@ public:
 
     /** Download and attach the exact file selected by the user. */
     Q_INVOKABLE void attachResult(int resultIndex);
+    Q_INVOKABLE int preferredFileIndex(int episode) const;
 
     /** Cancel the current request while preserving displayed results. */
     Q_INVOKABLE void cancel();
@@ -112,6 +113,7 @@ signals:
 private:
     friend class JimakuClientTest;
     friend class KitsunekkoClient;
+    friend class LocalSubtitleClient;
 
     struct MediaInfo
     {
@@ -175,7 +177,7 @@ private:
     [[nodiscard]] QVariantMap entryMap(const QJsonObject &entry) const;
     [[nodiscard]] QVariantMap fileMap(const FileInfo &file) const;
     [[nodiscard]] QString cachePath(const QString &name) const;
-    [[nodiscard]] QString extractZip(const QString &archivePath, QString *error) const;
+    [[nodiscard]] QString extractZip(const QString &archivePath, QString *error);
     [[nodiscard]] bool safeDownloadUrl(const QUrl &url) const;
 
     void useSelectedFile(quint64 generation);
@@ -204,6 +206,7 @@ private:
     QPointer<QNetworkReply> m_reply;
     QTimer m_attachTimer;
     QMetaObject::Connection m_attachTrackConnection;
+    QMetaObject::Connection m_attachSidConnection;
     QUrl m_baseUrl;
     QString m_apiKey;
     QString m_requestApiKey;
@@ -218,6 +221,10 @@ private:
     QString m_manualQuery;
     QString m_entryName;
     QString m_pendingAttachPath;
+    QVariantMap m_selectedLink;
+    QVariantMap m_activeLink;
+    QVariantMap m_savedSelection;
+    QString m_archiveMember;
     int m_selectedEntryIndex{-1};
     int m_selectedEpisode{-1};
     quint64 m_generation{0};

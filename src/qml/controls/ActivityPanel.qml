@@ -18,6 +18,7 @@ Frame {
         if (SubtitleLists.primary?.loading || SubtitleLists.secondary?.loading)
             items.push({text: qsTr("Reading subtitles…"), progress: -1});
         if (JimakuClient.busy) items.push({text: JimakuClient.status || qsTr("Loading subtitles…"), progress: -1});
+        if (LocalSubtitleClient.busy) items.push({text: LocalSubtitleClient.status, progress: -1});
         if (KitsunekkoClient.busy) items.push({text: KitsunekkoClient.status || qsTr("Loading subtitle library…"), progress: -1});
         if (DictionaryController.busy || DictionaryController.modifyingDatabase)
             items.push({text: DictionaryController.busy ? DictionaryController.activity : qsTr("Updating dictionaries…"), progress: DictionaryController.busy ? DictionaryController.progress : -1});

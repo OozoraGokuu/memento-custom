@@ -284,14 +284,22 @@ MpvPlayer {
         root.synchronizeSubtitleRenderers();
         JimakuClient.cancel();
         KitsunekkoClient.cancel();
+        LocalSubtitleClient.cancel();
+        const loadedPath = root.state.path;
         if (JimakuClient.autoFetch)
         {
             Qt.callLater(function() {
+                if (root.state.path !== loadedPath) return;
                 const link = EpisodeLibrary.subtitleLinkForFile(root.state.path);
-                if (link.provider === "kitsunekko")
+                if (link.autoLoad === false) return;
+                const saved = EpisodeLibrary.subtitleSelectionForFile(root.state.path);
+                const provider = saved.provider || link.provider;
+                if (provider === "local")
+                    LocalSubtitleClient.fetchForCurrentMedia();
+                else if (provider === "kitsunekko")
                     KitsunekkoClient.fetchLinkedForCurrentMedia();
-                else if (JimakuClient.apiKeyConfigured &&
-                         (!link.provider || link.provider === "jimaku"))
+                else if ((JimakuClient.apiKeyConfigured || saved.provider === "jimaku") &&
+                         (!provider || provider === "jimaku"))
                     JimakuClient.fetchForCurrentMedia();
             });
         }
@@ -413,6 +421,14 @@ MpvPlayer {
             root.controller.showText(
                 qsTr("Migaku export failed: %1").arg(error));
         }
+    }
+
+    Connections {
+        target: LocalSubtitleClient
+        function onSubtitleAttached(fileName, entryName) {
+            root.controller.showText(qsTr("Saved subtitle loaded: %1").arg(fileName));
+        }
+        function onFailed(error) { root.controller.showText(error); }
     }
 
     Connections {

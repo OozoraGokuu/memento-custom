@@ -39,6 +39,7 @@
 #include "player/mpvstate.h"
 #include "player/mpvtrack.h"
 #include "state/context.h"
+#include "jimaku/subtitlerelease.h"
 #include "util/directoryutils.h"
 
 namespace
@@ -284,48 +285,61 @@ int JimakuClient::selectedEpisode() const noexcept
 
 void JimakuClient::fetchForCurrentMedia()
 {
-    if (!apiKeyConfigured())
-    {
-        if (!m_busy)
-        {
-            finishError(tr("Add your Jimaku API key in Settings first."));
-        }
-        return;
-    }
-
+    if (m_context) { m_context->kitsunekkoClient()->cancel(); m_context->localSubtitleClient()->cancel(); }
     MediaInfo media = currentMedia();
     if (media.path.isEmpty() || media.title.isEmpty())
     {
-        if (!m_busy)
-        {
-            finishError(tr("Play an episode before fetching Jimaku subtitles."));
-        }
+        if (!m_busy) finishError(tr("Play an episode before fetching Jimaku subtitles."));
         return;
     }
-    if (media.episode < 0)
-    {
-        if (!m_busy)
-        {
-            finishError(tr(
-                "Memento could not determine this episode number. Use Search "
-                "Jimaku Subtitles to choose the episode and file manually."
-            ));
-        }
-        return;
-    }
-
-    // A valid media-load fetch supersedes any request associated with the
-    // previous file. Validation failures above leave that request untouched.
+    auto *library = m_context->episodeLibrary();
+    const QVariantMap saved = library->subtitleSelectionForFile(media.path);
+    const QVariantMap link = saved.isEmpty() ? library->subtitleLinkForFile(media.path) : saved;
     cancelActive();
     const quint64 generation = ++m_generation;
     m_operation = Operation::Fetch;
     m_requestApiKey = m_apiKey;
     m_media = std::move(media);
-    m_entryName.clear();
+    m_activeLink = link;
+    m_savedSelection = saved;
+    m_archiveMember = saved.value("archiveMember").toString();
+    m_entryName = link.value("name").toString();
     m_file = {};
-    setBusy(true);
+    if (!saved.isEmpty())
+    {
+        if (saved.value("provider").toString() != "jimaku")
+        {
+            finishError(tr("This episode has a saved subtitle from another source."));
+            return;
+        }
+        m_media.episode = saved.value("episode", m_media.episode).toInt();
+        m_file.name = saved.value("filename").toString();
+        const QString cached = saved.value("cachePath").toString();
+        if (QFileInfo(cached).isFile() && supportedSubtitle(cached))
+        {
+            setBusy(true);
+            setStatus(tr("Restoring this episode's selected subtitle…"));
+            attachPath(cached, generation);
+            return;
+        }
+    }
+    else if (m_media.episode >= 0)
+    {
+        const qint64 episode = qint64(m_media.episode) + link.value("episodeOffset", 0).toLongLong();
+        m_media.episode = episode >= 0 && episode <= 10000 ? int(episode) : -1;
+    }
 
-    const QVariantMap link = m_context->episodeLibrary()->subtitleLinkForFile(m_media.path);
+    if (!apiKeyConfigured())
+    {
+        finishError(tr("Add your Jimaku API key in Settings first."));
+        return;
+    }
+    if (m_media.episode < 0)
+    {
+        finishError(tr("Could not determine this episode number. Open subtitle search to select the episode and release."));
+        return;
+    }
+    setBusy(true);
     if (!link.isEmpty())
     {
         bool validId = false;
@@ -335,23 +349,18 @@ void JimakuClient::fetchForCurrentMedia()
             finishError(tr("The saved subtitle source is not a valid Jimaku title."));
             return;
         }
-        m_entryName = link.value("name").toString();
-        setStatus(tr("Loading linked title %1 — episode %2…")
+        if (saved.isEmpty() && link.value("releaseRule").toMap().isEmpty())
+        {
+            finishError(tr("Choose a subtitle file once to remember its group for this series."));
+            return;
+        }
+        setStatus(tr("Finding your selected release in %1 — episode %2…")
             .arg(m_entryName).arg(m_media.episode));
         beginFileList(generation, entryId, true);
         return;
     }
-
-    if (m_media.episode >= 0)
-    {
-        setStatus(tr("Searching Jimaku for %1 — episode %2…")
-            .arg(m_media.title)
-            .arg(m_media.episode));
-    }
-    else
-    {
-        setStatus(tr("Searching Jimaku for %1…").arg(m_media.title));
-    }
+    setStatus(tr("Searching Jimaku for %1 — episode %2…")
+        .arg(m_media.title).arg(m_media.episode));
     beginSearch(generation, m_media.title);
 }
 
@@ -455,12 +464,22 @@ void JimakuClient::selectEntryFiles(
     {
         m_entryName = entry.value(QStringLiteral("english_name")).toString();
     }
+    m_selectedLink = {{"provider", "jimaku"}, {"name", m_entryName}, {"entryId", entryId}};
+    if (m_context && m_context->episodeLibrary())
+    {
+        const auto previous = m_context->episodeLibrary()->subtitleLinkForFile(m_fileListMedia.path);
+        if (previous.value("provider").toString() == "jimaku" &&
+            previous.value("entryId").toLongLong() == entryId)
+            m_selectedLink = previous;
+        if (previous.contains("autoLoad")) m_selectedLink.insert("autoLoad", previous.value("autoLoad"));
+    }
     if (persist && m_context && m_context->episodeLibrary())
     {
         auto *library = m_context->episodeLibrary();
+        const auto previous = library->subtitleLinkForFile(m_fileListMedia.path);
         if (library->containsFile(m_fileListMedia.path) &&
-            !library->setSubtitleLinkForFile(m_fileListMedia.path,
-                {{"provider", "jimaku"}, {"name", m_entryName}, {"entryId", entryId}}))
+            previous.value("preferredFile").toString().isEmpty() &&
+            !library->setSubtitleLinkForFile(m_fileListMedia.path, m_selectedLink))
             emit failed(tr("Could not save the subtitle link. Check library storage permissions."));
     }
     setBrowseFiles({});
@@ -489,10 +508,29 @@ void JimakuClient::openLinkedEntry(const QVariantMap &link, int episode, bool al
     }
     setSearchEntries({QJsonObject{{"id", id}, {"name", link.value("name").toString()}}});
     selectEntryFiles(0, episode, !all, false);
+    m_selectedLink = link;
+}
+
+int JimakuClient::preferredFileIndex(int episode) const
+{
+    const QVariantMap rule = m_selectedLink.value("releaseRule").toMap();
+    if (rule.isEmpty()) return -1;
+    int selected = -1;
+    for (int index = 0; index < m_browseFiles.size(); ++index)
+    {
+        const QString name = m_browseFiles.at(index).name;
+        const bool archive = extensionOf(name) == "zip" &&
+            name == m_selectedLink.value("preferredFile").toString();
+        if (!archive && !SubtitleRelease::matches(name, episode, rule)) continue;
+        if (selected >= 0) return -1;
+        selected = index;
+    }
+    return selected;
 }
 
 void JimakuClient::attachResult(int resultIndex)
 {
+    if (m_context) { m_context->kitsunekkoClient()->cancel(); m_context->localSubtitleClient()->cancel(); }
     if (m_busy)
     {
         return;
@@ -531,6 +569,17 @@ void JimakuClient::attachResult(int resultIndex)
     m_requestApiKey = m_apiKey;
     m_media = std::move(media);
     m_file = m_browseFiles.at(resultIndex);
+    const int detectedEpisode = episodeNumber(m_file.name);
+    if (supportedSubtitle(m_file.name) && detectedEpisode >= 0)
+        m_media.episode = detectedEpisode;
+    m_activeLink = m_selectedLink;
+    m_activeLink.insert("releaseRule", SubtitleRelease::fromFile(m_file.name, m_media.episode));
+    m_activeLink.insert("preferredFile", m_file.name);
+    m_activeLink.remove("memberRule");
+    if (m_fileListMedia.episode >= 0 && m_media.episode >= 0)
+        m_activeLink.insert("episodeOffset", m_media.episode - m_fileListMedia.episode);
+    m_savedSelection.clear();
+    m_archiveMember.clear();
     setBusy(true);
     useSelectedFile(generation);
 }
@@ -548,6 +597,7 @@ void JimakuClient::clearSearch()
     m_selectedEntryIndex = -1;
     m_selectedEpisode = -1;
     m_fileListMedia = {};
+    m_selectedLink.clear();
     setSearchEntries({});
     setBrowseFiles({});
     setStatus({});
@@ -790,8 +840,7 @@ void JimakuClient::handleFileList(
     {
         setBrowseFiles(usableFiles(files));
         if (m_context && m_selectedEpisode >= 0 && !m_browseFiles.isEmpty())
-            m_context->episodeLibrary()->rememberSubtitleSearch(
-                {{"provider", "jimaku"}, {"name", m_entryName}, {"entryId", entryId}}, m_selectedEpisode);
+            m_context->episodeLibrary()->rememberSubtitleSearch(m_selectedLink, m_selectedEpisode);
         m_operation = Operation::None;
         setBusy(false);
         if (m_browseFiles.isEmpty())
@@ -819,10 +868,8 @@ void JimakuClient::handleFileList(
     }
     if (m_file.url.isEmpty())
     {
-        finishError(tr(
-            "Jimaku has no directly usable ASS, SSA, SRT, VTT, or ZIP "
-            "subtitle for this episode."
-        ));
+        finishError(m_activeLink.isEmpty() ? tr("Jimaku has no usable subtitle for this episode.") :
+            tr("Your selected subtitle release is missing or ambiguous for this episode. Open subtitle search to choose a file; your saved group has been kept."));
         return;
     }
     useSelectedFile(generation);
@@ -1002,6 +1049,10 @@ void JimakuClient::attachPath(const QString &path, quint64 generation)
         m_context->player()->state(), &MpvState::subtitleTracksChanged,
         this, &JimakuClient::handleAttachedTracksChanged
     );
+    m_attachSidConnection = connect(
+        m_context->player()->state(), &MpvState::sidChanged,
+        this, &JimakuClient::handleAttachedTracksChanged
+    );
     m_attachTimer.start();
 
     if (!m_context->player()->controller()->loadSubtitle(path))
@@ -1042,7 +1093,8 @@ void JimakuClient::handleAttachedTracksChanged()
     bool attached = false;
     for (const MpvTrack *track : m_context->player()->state()->subtitleTracks())
     {
-        if (track == nullptr || !track->external())
+        if (track == nullptr || !track->external() ||
+            track->id() != m_context->player()->state()->sid())
         {
             continue;
         }
@@ -1072,6 +1124,32 @@ void JimakuClient::handleAttachedTracksChanged()
     }
 
     const QString fileName = QFileInfo(m_pendingAttachPath).fileName();
+    const QString attachedPath = m_pendingAttachPath;
+    const bool manual = m_operation == Operation::ManualDownload;
+    const double delay = manual ? m_context->player()->state()->subtitle()->delay() :
+        m_savedSelection.value("delay", 0.0).toDouble();
+    if (!manual) m_context->player()->controller()->setSubtitleDelay(delay);
+    if (!m_activeLink.isEmpty() && m_context->episodeLibrary()->containsFile(m_media.path))
+    {
+        auto link = manual ? m_activeLink : m_context->episodeLibrary()->subtitleLinkForFile(m_media.path);
+        if (manual && !m_archiveMember.isEmpty())
+            link.insert("memberRule", SubtitleRelease::fromFile(m_archiveMember, m_media.episode));
+        QVariantMap selection = m_activeLink;
+        selection.insert("filename", m_file.name);
+        selection.insert("cachePath", attachedPath);
+        selection.insert("episode", m_media.episode);
+        selection.insert("delay", delay);
+        selection.insert("archiveMember", m_archiveMember);
+        if (!m_archiveMember.isEmpty())
+            selection.insert("memberRule", SubtitleRelease::fromFile(m_archiveMember, m_media.episode));
+        if (!m_context->episodeLibrary()->rememberSubtitleSelection(m_media.path, link, selection))
+        {
+            clearPendingAttach();
+            finishError(tr("The subtitle loaded, but its release preference could not be saved."));
+            return;
+        }
+        m_context->episodeLibrary()->rememberSubtitleSearch(link, m_media.episode);
+    }
     clearPendingAttach();
     emit subtitleAttached(fileName, m_entryName);
     finishSuccess(tr("Jimaku subtitle attached: %1").arg(fileName));
@@ -1081,7 +1159,9 @@ void JimakuClient::clearPendingAttach()
 {
     m_attachTimer.stop();
     QObject::disconnect(m_attachTrackConnection);
+    QObject::disconnect(m_attachSidConnection);
     m_attachTrackConnection = {};
+    m_attachSidConnection = {};
     m_pendingAttachPath.clear();
     m_pendingAttachGeneration = 0;
 }
@@ -1188,6 +1268,10 @@ JimakuClient::FileInfo JimakuClient::selectFile(
 {
     FileInfo result;
     int bestScore = std::numeric_limits<int>::min();
+    const bool locked = !m_activeLink.isEmpty();
+    const QString exactName = m_savedSelection.value("filename").toString();
+    const QVariantMap rule = m_activeLink.value("releaseRule").toMap();
+    int matched = 0;
     for (const QJsonValue &value : files)
     {
         const QJsonObject file = value.toObject();
@@ -1197,6 +1281,20 @@ JimakuClient::FileInfo JimakuClient::selectFile(
         if (name.isEmpty() || !url.isValid() || size <= 0 ||
             size > MAX_DOWNLOAD_SIZE)
         {
+            continue;
+        }
+        if (locked)
+        {
+            const bool archive = extensionOf(name) == "zip" &&
+                name == m_activeLink.value("preferredFile").toString();
+            if (!exactName.isEmpty())
+            {
+                if (name != exactName) continue;
+            }
+            else if (!archive && !SubtitleRelease::matches(name, m_media.episode, rule)) continue;
+            if (++matched > 1) return {};
+            result = {name, url.isRelative() ? m_baseUrl.resolved(url) : url, size,
+                file.value(QStringLiteral("last_modified")).toString()};
             continue;
         }
 
@@ -1365,7 +1463,7 @@ QString JimakuClient::cachePath(const QString &name) const
 
 QString JimakuClient::extractZip(
     const QString &archivePath,
-    QString *error) const
+    QString *error)
 {
     int zipError = 0;
     zip_t *archive = zip_open(
@@ -1392,6 +1490,9 @@ QString JimakuClient::extractZip(
     QString bestUntaggedName;
     int bestUntaggedScore = std::numeric_limits<int>::min();
     int untaggedCount = 0;
+    int exactCount = 0;
+    const QVariantMap memberRule = m_activeLink.value("memberRule").toMap();
+    const QString exactMember = m_savedSelection.value("archiveMember").toString();
     std::size_t nameBytes = 0;
     for (zip_int64_t index = 0; index < count; ++index)
     {
@@ -1420,6 +1521,9 @@ QString JimakuClient::extractZip(
         {
             continue;
         }
+        if (!exactMember.isEmpty() && name != exactMember) continue;
+        if (exactMember.isEmpty() && !memberRule.isEmpty() &&
+            !SubtitleRelease::matches(name, m_media.episode, memberRule)) continue;
         const int detectedEpisode = episodeNumber(name);
         if (m_media.episode >= 0)
         {
@@ -1441,6 +1545,7 @@ QString JimakuClient::extractZip(
             }
         }
         const int score = fileScore(name, m_media.episode);
+        ++exactCount;
         if (score > bestScore)
         {
             bestScore = score;
@@ -1458,10 +1563,11 @@ QString JimakuClient::extractZip(
         bestName = bestUntaggedName;
     }
 
-    if (bestIndex < 0)
+    if (bestIndex < 0 || exactCount > 1)
     {
         zip_close(archive);
-        *error = tr("The Jimaku ZIP archive contains no usable subtitle file.");
+        *error = exactCount > 1 ? tr("This ZIP contains multiple subtitle releases for the episode. Select an individual subtitle file to choose your group.") :
+            tr("The Jimaku ZIP archive contains no matching subtitle file for the selected release.");
         return {};
     }
 
@@ -1514,6 +1620,7 @@ QString JimakuClient::extractZip(
         *error = tr("Memento could not extract the Jimaku subtitle.");
         return {};
     }
+    m_archiveMember = bestName;
     return outputPath;
 }
 
