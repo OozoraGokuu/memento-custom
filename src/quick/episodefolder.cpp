@@ -1438,6 +1438,29 @@ void EpisodeFolder::recordPlayed(const QString &file)
     }
 }
 
+bool EpisodeFolder::hasNextEpisode(const QString &file) const
+{
+    int episode = -1;
+    const int index = findEntryForFile(file, &episode);
+    if (index < 0 || episode < 0) return false;
+    const auto &entry = m_entries.at(index);
+    const int next = episode + 1;
+    if (next >= entry.relativePaths.size()) return false;
+    if (entry.type == "torrent")
+        return next < entry.torrentFileIndices.size() && next < entry.episodeSizes.size() &&
+            entry.torrentFileIndices.at(next) >= 0 && entry.episodeSizes.at(next) > 0;
+    return next < entry.resolvedPaths.size() && QFileInfo(entry.resolvedPaths.at(next)).isFile();
+}
+
+QString EpisodeFolder::nextEpisodePath(const QString &file)
+{
+    if (!hasNextEpisode(file)) return {};
+    int episode = -1;
+    const int index = findEntryForFile(file, &episode);
+    setCurrentIndex(index);
+    return episodePath(episode + 1);
+}
+
 QString EpisodeFolder::episodePath(int episodeIndex)
 {
     if (m_currentIndex < 0 || m_currentIndex >= m_entries.size())

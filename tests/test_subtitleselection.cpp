@@ -76,6 +76,31 @@ private slots:
         QVERIFY(QDir().mkpath(DirectoryUtils::getConfigDir()));
     }
 
+    void nextEpisodeUsesPlayingSeriesAndDoesNotWrap()
+    {
+        QTemporaryDir first, second;
+        QVERIFY(writeFile(first.filePath("Show - 01.mkv")));
+        QVERIFY(writeFile(first.filePath("Show - 02.mkv")));
+        QVERIFY(writeFile(first.filePath("Show - 10.mkv")));
+        QVERIFY(writeFile(second.filePath("Other - 01.mkv")));
+        EpisodeFolder library;
+        const int series = library.addFolder(QUrl::fromLocalFile(first.path()));
+        QVERIFY(series >= 0);
+        const int other = library.addFolder(QUrl::fromLocalFile(second.path()));
+        QVERIFY(other >= 0);
+        library.setCurrentIndex(other);
+        QVERIFY(library.hasNextEpisode(first.filePath("Show - 01.mkv")));
+        QCOMPARE(library.currentIndex(), other);
+        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 01.mkv")), first.filePath("Show - 02.mkv"));
+        QCOMPARE(library.currentIndex(), series);
+        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 02.mkv")), first.filePath("Show - 10.mkv"));
+        QVERIFY(!library.hasNextEpisode(first.filePath("Show - 10.mkv")));
+        QVERIFY(library.nextEpisodePath(first.filePath("Show - 10.mkv")).isEmpty());
+        QVERIFY(library.nextEpisodePath("/not-in-library.mkv").isEmpty());
+        QVERIFY(QFile::remove(first.filePath("Show - 02.mkv")));
+        QVERIFY(!library.hasNextEpisode(first.filePath("Show - 01.mkv")));
+    }
+
     void keepsExactEpisodeChoicesAcrossPreferenceChangesAndReload()
     {
         QTemporaryDir media;

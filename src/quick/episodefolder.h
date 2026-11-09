@@ -118,6 +118,9 @@ public:
     Q_INVOKABLE void setEpisodeWatched(int episodeIndex, bool watched);
     Q_INVOKABLE void recordPlayed(const QString &file);
     Q_INVOKABLE QString episodePath(int episodeIndex);
+    /** Adjacent episode in the playing file's library entry, regardless of the browsed entry. */
+    Q_INVOKABLE bool hasNextEpisode(const QString &file) const;
+    Q_INVOKABLE QString nextEpisodePath(const QString &file);
 
 signals:
     void libraryChanged();

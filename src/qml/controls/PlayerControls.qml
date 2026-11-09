@@ -12,6 +12,29 @@ Rectangle {
     property bool sentencePending: false
     signal copySubtitleRequested()
     signal copyScreenshotRequested()
+    property bool nextEpisodeAvailable: false
+
+    function refreshNextEpisode() {
+        nextEpisodeAvailable = EpisodeLibrary.hasNextEpisode(root.player.state.path);
+    }
+    Component.onCompleted: refreshNextEpisode()
+    Connections {
+        target: EpisodeLibrary
+        function onLibraryChanged() { root.refreshNextEpisode(); }
+        function onEpisodesChanged() { root.refreshNextEpisode(); }
+    }
+
+    function playNextEpisode() {
+        const path = EpisodeLibrary.nextEpisodePath(root.player.state.path);
+        if (!path) {
+            root.refreshNextEpisode();
+            root.player.controller.showText(EpisodeLibrary.lastError || qsTr("No next episode available"));
+            return;
+        }
+        if (root.player.controller.loadFile(path, false, [
+                "demuxer-max-bytes=32MiB", "demuxer-max-back-bytes=8MiB", "cache-pause-initial=no"]))
+            root.player.controller.play();
+    }
 
     readonly property real position: durationSlider.position
     // Keep the same zero-based row cursor used by subtitle-list search.
@@ -54,7 +77,7 @@ Rectangle {
 
     Connections {
         target: root.player.state
-        function onPathChanged() { root.resetSubtitleLine(); }
+        function onPathChanged() { root.resetSubtitleLine(); root.refreshNextEpisode(); }
         function onTimePositionChanged(position) {
             if (subtitleSeekSettled.running &&
                     Math.abs(position - root.subtitleSeekTarget) < 0.25) {
@@ -166,7 +189,7 @@ Rectangle {
         height: 34
         Label {
             objectName: "subtitleCounter"
-            visible: !!SubtitleLists.primary?.fullTimelineReady
+            visible: root.width >= 560 && !!SubtitleLists.primary?.fullTimelineReady
             text: qsTr("Subtitle %1 / %2")
                 .arg(root.subtitleLineIndex + 1)
                 .arg(root.subtitleLineCount)
@@ -189,6 +212,17 @@ Rectangle {
             ToolTip.visible: hovered
             ToolTip.text: qsTr("Ctrl+X: copy screenshot with subtitles, then its sentence")
             onClicked: root.copyScreenshotRequested()
+        }
+
+        ToolButton {
+            objectName: "nextEpisodeButton"
+            text: qsTr("Next episode ▶")
+            focusPolicy: Qt.NoFocus
+            enabled: root.nextEpisodeAvailable && !root.player.loading
+            ToolTip.visible: hovered
+            ToolTip.text: root.nextEpisodeAvailable ? qsTr("Play the next episode in this series") :
+                qsTr("No next episode available in this media library")
+            onClicked: root.playNextEpisode()
         }
 
     }
