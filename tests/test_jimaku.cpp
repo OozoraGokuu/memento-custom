@@ -108,6 +108,97 @@ private slots:
         context.setPlayer(nullptr);
     }
 
+    void savedFetchFollowsPlayingEpisodeAndIgnoresGlobalSearch()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        const auto cleanup = qScopeGuard([&] { context.setPlayer(nullptr); });
+        QTemporaryDir folder, otherFolder;
+        for (const auto &name : {"EP1.mkv", "EP2.mkv", "EP4.mkv"}) {
+            QFile file(folder.filePath(name));
+            QVERIFY(file.open(QIODevice::WriteOnly)); file.write("test"); file.close();
+        }
+        QFile other(otherFolder.filePath("Other - 02.mkv"));
+        QVERIFY(other.open(QIODevice::WriteOnly)); other.write("test"); other.close();
+        auto *library = context.episodeLibrary();
+        QVERIFY(library->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        QVERIFY(library->addFolder(QUrl::fromLocalFile(otherFolder.path())) >= 0);
+        auto link = releaseLink("EP 25.ASS", 25);
+        link.insert("episodeOffset", 24);
+        QVERIFY(library->setSubtitleLinkForFile(folder.filePath("EP1.mkv"), link));
+        auto unrelated = releaseLink("[Other] Other - 99.SRT", 99);
+        unrelated.insert("entryId", 456);
+        QVERIFY(library->rememberSubtitleSearch(unrelated, 99));
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl("http://127.0.0.1:1");
+
+        player.state()->setPath(folder.filePath("EP2.mkv"));
+        for (int retry = 0; retry < 2; ++retry) {
+            const auto target = client.linkedSubtitleTarget();
+            QVERIFY(!target.contains("error"));
+            QCOMPARE(target.value("episode").toInt(), 26);
+            QCOMPARE(target.value("link").toMap(), link);
+            client.fetchForCurrentMedia();
+            QVERIFY(client.m_reply);
+            QCOMPARE(client.m_reply->url().path(), QString("/api/entries/123/files"));
+            QCOMPARE(QUrlQuery(client.m_reply->url()).queryItemValue("episode"), QString("26"));
+            client.cancel();
+            QCOMPARE(library->lastSubtitleSearch().value("episode").toInt(), 99);
+        }
+        player.state()->setPath(folder.filePath("EP4.mkv"));
+        QCOMPARE(client.linkedSubtitleTarget().value("episode").toInt(), 28);
+        player.state()->setPath(folder.filePath("EP1.mkv"));
+        QCOMPARE(client.linkedSubtitleTarget().value("episode").toInt(), 25);
+        player.state()->setPath(other.fileName());
+        QVERIFY(client.linkedSubtitleTarget().contains("error"));
+    }
+
+    void savedFetchRestoresExactEpisodeChoiceBeforeSeriesPreference()
+    {
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        const auto cleanup = qScopeGuard([&] { context.setPlayer(nullptr); });
+        QTemporaryDir folder;
+        QFile video(folder.filePath("Show - 02.mkv"));
+        QVERIFY(video.open(QIODevice::WriteOnly)); video.write("test"); video.close();
+        auto *library = context.episodeLibrary();
+        QVERIFY(library->addFolder(QUrl::fromLocalFile(folder.path())) >= 0);
+        const auto oldLink = releaseLink("[Chosen] EP 14.ASS", 14);
+        auto selection = oldLink;
+        selection.insert("filename", "[Chosen] EP 14.ASS");
+        selection.insert("episode", 14);
+        QVERIFY(library->rememberSubtitleSelection(video.fileName(), oldLink, selection));
+        auto replacement = releaseLink("[Different] EP2.SRT", 2);
+        replacement.insert("entryId", 456);
+        QVERIFY(library->setSubtitleLinkForFile(video.fileName(), replacement));
+        player.state()->setPath(video.fileName());
+        JimakuClient client(&context);
+        const auto target = client.linkedSubtitleTarget();
+        QCOMPARE(target.value("episode").toInt(), 14);
+        QCOMPARE(target.value("link").toMap().value("entryId").toInt(), 123);
+        QCOMPARE(target.value("link").toMap().value("filename").toString(), QString("[Chosen] EP 14.ASS"));
+    }
+
+    void savedFetchKeepsFormatAndRejectsDuplicateCandidates()
+    {
+        JimakuClient client(nullptr);
+        client.m_selectedLink = releaseLink("EP 1.ASS", 1);
+        client.setBrowseFiles({
+            {"EP1.SRT", QUrl("https://jimaku.cc/one.srt"), 100, {}},
+            {"EP2.SRT", QUrl("https://jimaku.cc/two.srt"), 100, {}},
+            {"EP2.ASS", QUrl("https://jimaku.cc/two.ass"), 100, {}}
+        });
+        QCOMPARE(client.preferredFileIndex(2), 2);
+        client.setBrowseFiles({
+            {"EP 2.ASS", QUrl("https://jimaku.cc/two-a.ass"), 100, {}},
+            {"EP2.ASS", QUrl("https://jimaku.cc/two-b.ass"), 100, {}}
+        });
+        QCOMPARE(client.preferredFileIndex(2), -1);
+    }
+
     void nextEpisodeAutomaticallyUsesSavedSeriesLink()
     {
         Context context;
@@ -338,6 +429,41 @@ private slots:
         client.openLinkedEntry({{"provider", "jimaku"}}, 23);
         QCOMPARE(failed.size(), 2);
         QVERIFY(!client.busy());
+    }
+
+    void browsingFilesDoesNotAdvanceSuccessfulSubtitleHistory()
+    {
+        Context context;
+        const auto selected = releaseLink("EP 1.ASS", 1);
+        QVERIFY(context.episodeLibrary()->rememberSubtitleSearch(selected, 1));
+        const auto history = context.episodeLibrary()->lastSubtitleSearch();
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        const QByteArray body = QJsonDocument(QJsonArray{
+            subtitleFile("EP2.ASS", "/two.ass")}).toJson(QJsonDocument::Compact);
+        connect(&server, &QTcpServer::newConnection, &server, [&server, body] {
+            auto *socket = server.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, socket, [socket, body] {
+                const auto request = socket->property("request").toByteArray() + socket->readAll();
+                socket->setProperty("request", request);
+                if (!request.contains("\r\n\r\n") || socket->property("answered").toBool()) return;
+                socket->setProperty("answered", true);
+                socket->write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                    QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+                socket->disconnectFromHost();
+            });
+            connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+        });
+        JimakuClient client(&context);
+        client.m_apiKey = "test-key";
+        client.m_baseUrl = QUrl(QString("http://127.0.0.1:%1").arg(server.serverPort()));
+        for (int retry = 0; retry < 2; ++retry) {
+            client.openLinkedEntry(selected, 2, true);
+            QTRY_VERIFY(!client.busy());
+            QCOMPARE(client.fileResults().size(), 1);
+            QCOMPARE(context.episodeLibrary()->lastSubtitleSearch(), history);
+            client.cancel();
+        }
     }
 
     void extractsEpisodeAndCleansReleaseNames()

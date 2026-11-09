@@ -30,7 +30,7 @@ public:
     QVariantList fileResults() const { return m_files; }
     QString selectedEntryName() const { return m_entryName; }
     int selectedEpisode() const { return m_episode; }
-    Q_INVOKABLE void fetchLinkedForCurrentMedia();
+    Q_INVOKABLE void fetchLinkedForCurrentMedia(bool manual = false);
     Q_INVOKABLE void refreshCatalog(const QString &query);
     Q_INVOKABLE void search(const QString &query);
     Q_INVOKABLE void selectEntry(int index, int episode = -1);
@@ -50,7 +50,8 @@ private:
     void loadCategory(int index);
     bool loadCachedCatalog();
     void startCatalogLoad();
-    void resolveLinkedCatalog(const QVariantMap &link, int episode, bool force = false);
+    void resolveLinkedCatalog(const QVariantMap &link, int episode, bool force = false,
+                              bool automatic = true, bool all = false);
     void finishLinkedCatalog(bool fresh);
     void filterTitles();
     static QVariantList parseFiles(const QByteArray &data, const QString &prefix, int episode);
@@ -71,6 +72,7 @@ private:
     QDateTime m_catalogFetched;
     QVariantMap m_catalogLink;
     int m_catalogEpisode{-1};
+    bool m_catalogAutomatic{true}, m_catalogAll{false};
     QNetworkAccessManager m_manager;
     QPointer<QNetworkReply> m_reply;
     QVariantList m_entries, m_files;

@@ -12,7 +12,6 @@ Dialog {
     property int selectedEntryIndex: -1
     property var savedLink: ({})
     property bool browsingLink: false
-    property bool attachNextWhenReady: false
 
     function refreshLink() {
         savedLink = EpisodeLibrary.subtitleLinkForFile(root.player.state.path);
@@ -28,7 +27,6 @@ Dialog {
     readonly property var client: useJimaku ? JimakuClient : KitsunekkoClient
 
     function openForCurrentMedia() {
-        root.attachNextWhenReady = false;
         errorLabel.text = "";
         JimakuClient.clearSearch();
         KitsunekkoClient.clearSearch();
@@ -53,24 +51,22 @@ Dialog {
         });
     }
 
-    function openNextEpisode() {
-        const previous = EpisodeLibrary.lastSubtitleSearch;
-        if ((previous.provider !== "jimaku" && previous.provider !== "kitsunekko") || previous.episode < 0) return;
+    function openLinkedEpisode() {
         root.openForCurrentMedia();
-        root.savedLink = previous;
-        providerBox.currentIndex = previous.provider === "jimaku" ? 0 : 1;
-        queryField.text = previous.name;
-        episodeBox.value = previous.episode + 1;
-        root.attachNextWhenReady = true;
-        root.browseLink(false);
-    }
-
-    function attachNextIfUnambiguous() {
-        if (!root.attachNextWhenReady || root.client.busy) return;
-        root.attachNextWhenReady = false;
-        const index = root.client.preferredFileIndex(episodeBox.value);
-        if (index >= 0) root.client.attachResult(index);
-        else errorLabel.text = qsTr("No single file matches your saved release for this episode. Choose a file below.");
+        const target = JimakuClient.linkedSubtitleTarget();
+        if (target.error) {
+            errorLabel.text = target.error;
+            return;
+        }
+        root.savedLink = target.link;
+        root.browsingLink = true;
+        providerBox.currentIndex = target.link.provider === "jimaku" ? 0 : 1;
+        queryField.text = target.link.name;
+        episodeBox.value = target.episode;
+        // Use the same current-episode path as automatic loading. Retrying
+        // cannot advance the episode, and Kitsunekko refreshes its catalog.
+        if (root.useJimaku) JimakuClient.fetchForCurrentMedia();
+        else KitsunekkoClient.fetchLinkedForCurrentMedia(true);
     }
 
     function saveKeyAndTest() {
@@ -94,7 +90,7 @@ Dialog {
     title: qsTr("Search Japanese subtitles")
     standardButtons: Dialog.Close
     closePolicy: Popup.CloseOnEscape
-    onClosed: { root.attachNextWhenReady = false; JimakuClient.cancel(); KitsunekkoClient.cancel(); }
+    onClosed: { JimakuClient.cancel(); KitsunekkoClient.cancel(); }
 
     Connections {
         target: EpisodeLibrary
@@ -111,11 +107,7 @@ Dialog {
     Connections {
         target: root.client
         ignoreUnknownSignals: true
-        function onChanged() { Qt.callLater(root.attachNextIfUnambiguous); }
-        function onBusyChanged() { Qt.callLater(root.attachNextIfUnambiguous); }
-
         function onFailed(message) {
-            root.attachNextWhenReady = false;
             errorLabel.text = message;
         }
 

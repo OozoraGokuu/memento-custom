@@ -66,6 +66,9 @@ jobs:
           # generation because the package manager's tools are off PATH.
           test "$(command -v ffmpeg)" = /opt/local/bin/ffmpeg
           test "$(command -v ffprobe)" = /opt/local/bin/ffprobe
+          # Match libmpv's pinned FFmpeg 8 dependency to avoid mixing two
+          # same-soname libav builds in the standalone app.
+          test -x /opt/local/libexec/ffmpeg8/bin/ffmpeg8
           # Keep preinstalled Homebrew headers out of this MacPorts build.
           # This directory belongs only to the disposable GitHub runner.
           if [[ -d /usr/local/include ]]; then
@@ -80,6 +83,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR;/opt/local;/opt/local/libexec/boost/1.88" \
             -DCMAKE_IGNORE_PREFIX_PATH="/opt/homebrew;/usr/local" \
+            -DMEMENTO_FFMPEG_EXECUTABLE=/opt/local/libexec/ffmpeg8/bin/ffmpeg8 \
             -DMEMENTO_RELEASE_BUILD=ON -DMEMENTO_BUNDLE=ON \
             -DMEMENTO_MECAB_SUPPORT=ON -DMEMENTO_OCR_SUPPORT=OFF \
             -DMEMENTO_WERROR=ON -DMEMENTO_CODESIGN_IDENTITY=-

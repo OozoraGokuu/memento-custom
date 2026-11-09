@@ -247,6 +247,17 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(APPLE AND MEMENTO_BUNDLE)
+    # Embedded subtitle timelines need the command-line extractor in addition
+    # to libmpv's encoder. Ship it so Finder launches need no package-manager PATH.
+    find_program(MEMENTO_FFMPEG_EXECUTABLE NAMES ffmpeg8 ffmpeg
+        HINTS /opt/local/libexec/ffmpeg8/bin /opt/local/bin REQUIRED)
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/CopyFFmpegMacOS.cmake.in"
+        "${PROJECT_BINARY_DIR}/CopyFFmpegMacOS.cmake"
+        @ONLY
+    )
+    install(SCRIPT "${PROJECT_BINARY_DIR}/CopyFFmpegMacOS.cmake")
+
     # BundleUtilities walks the actual linked dependency graph from the bundle.
     # These directories are only search hints so it can resolve @rpath entries
     # back to the exact libraries CMake found on this machine.
@@ -329,6 +340,10 @@ if(APPLE AND MEMENTO_BUNDLE)
 
     add_custom_target(
         memento_bundle
+        COMMAND
+            "${CMAKE_COMMAND}"
+            -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>
+            -P "${PROJECT_BINARY_DIR}/CopyFFmpegMacOS.cmake"
         COMMAND
             "${CMAKE_COMMAND}"
             -DMEMENTO_BUNDLE_PATH=$<TARGET_BUNDLE_DIR:memento>

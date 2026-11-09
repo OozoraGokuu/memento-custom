@@ -1,0 +1,17 @@
+if(NOT DEFINED MEMENTO_BUNDLE_PATH)
+    set(MEMENTO_BUNDLE_PATH "${CMAKE_INSTALL_PREFIX}/Memento.app")
+endif()
+
+if(NOT EXISTS "${MEMENTO_BUNDLE_PATH}")
+    message(FATAL_ERROR "Cannot copy FFmpeg: ${MEMENTO_BUNDLE_PATH} does not exist.")
+endif()
+
+# BundleUtilities discovers every executable in Contents/MacOS, including this
+# helper, and copies/rewrites its dependency closure before codesign runs.
+get_filename_component(MEMENTO_FFMPEG_SOURCE "@MEMENTO_FFMPEG_EXECUTABLE@" REALPATH)
+file(INSTALL
+    "${MEMENTO_FFMPEG_SOURCE}"
+    DESTINATION "${MEMENTO_BUNDLE_PATH}/Contents/MacOS"
+    TYPE PROGRAM
+    RENAME ffmpeg
+)

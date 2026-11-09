@@ -19,6 +19,18 @@ for label, root in [('MacPorts', Path('/opt/local/share/doc')), ('Qt', qt / 'Lic
                 shutil.copy2(path, target)
 (destination / 'MacPorts-packages.txt').write_text(subprocess.check_output(
     ['/opt/local/bin/port', 'installed'], text=True))
+# Preserve the exact shipped helper's license declaration and build options
+# alongside the full dependency license files and pinned source inventory.
+ffmpeg = bundle / 'Contents/MacOS/ffmpeg'
+for option, name in [('-L', 'FFmpeg-license.txt'), ('-version', 'FFmpeg-build.txt')]:
+    (destination / name).write_text(subprocess.check_output(
+        [str(ffmpeg), option], text=True, stderr=subprocess.STDOUT))
+# The pinned MacPorts variant is +gpl2, as recorded above. Include the full
+# license text already used by this GPL-2.0 application as an explicit notice.
+ffmpeg_license = (destination / 'FFmpeg-license.txt').read_text()
+if 'GNU General Public License' not in ffmpeg_license or 'version 2' not in ffmpeg_license:
+    raise SystemExit('Update the FFmpeg license bundle for this different build variant')
+shutil.copy2('LICENSE', destination / 'FFmpeg-GPL-2.0.txt')
 (destination / 'Sources.txt').write_text(
     'Memento source: https://github.com/OozoraGokuu/memento-custom\n'
     'Build commit: ' + subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True) +

@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -91,9 +92,11 @@ private slots:
         library.setCurrentIndex(other);
         QVERIFY(library.hasNextEpisode(first.filePath("Show - 01.mkv")));
         QCOMPARE(library.currentIndex(), other);
-        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 01.mkv")), first.filePath("Show - 02.mkv"));
+        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 01.mkv")),
+            QFileInfo(first.filePath("Show - 02.mkv")).canonicalFilePath());
         QCOMPARE(library.currentIndex(), series);
-        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 02.mkv")), first.filePath("Show - 10.mkv"));
+        QCOMPARE(library.nextEpisodePath(first.filePath("Show - 02.mkv")),
+            QFileInfo(first.filePath("Show - 10.mkv")).canonicalFilePath());
         QVERIFY(!library.hasNextEpisode(first.filePath("Show - 10.mkv")));
         QVERIFY(library.nextEpisodePath(first.filePath("Show - 10.mkv")).isEmpty());
         QVERIFY(library.nextEpisodePath("/not-in-library.mkv").isEmpty());

@@ -287,7 +287,7 @@ void JimakuClient::fetchForCurrentMedia()
 {
     if (m_context) { m_context->kitsunekkoClient()->cancel(); m_context->localSubtitleClient()->cancel(); }
     MediaInfo media = currentMedia();
-    if (media.path.isEmpty() || media.title.isEmpty())
+    if (media.path.isEmpty())
     {
         if (!m_busy) finishError(tr("Play an episode before fetching Jimaku subtitles."));
         return;
@@ -357,6 +357,11 @@ void JimakuClient::fetchForCurrentMedia()
         setStatus(tr("Finding your selected release in %1 — episode %2…")
             .arg(m_entryName).arg(m_media.episode));
         beginFileList(generation, entryId, true);
+        return;
+    }
+    if (m_media.title.isEmpty())
+    {
+        finishError(tr("Open subtitle search to link this episode to a title first."));
         return;
     }
     setStatus(tr("Searching Jimaku for %1 — episode %2…")
@@ -614,6 +619,32 @@ int JimakuClient::suggestedEpisode() const
     return currentMedia().episode;
 }
 
+QVariantMap JimakuClient::linkedSubtitleTarget() const
+{
+    const auto failure = [](const QString &message) {
+        return QVariantMap{{"error", message}};
+    };
+    const MediaInfo media = currentMedia();
+    if (media.path.isEmpty() || !m_context || !m_context->episodeLibrary())
+        return failure(tr("Play an episode before fetching its saved subtitles."));
+    const auto *library = m_context->episodeLibrary();
+    const QVariantMap selection = library->subtitleSelectionForFile(media.path);
+    const QVariantMap link = selection.isEmpty()
+        ? library->subtitleLinkForFile(media.path) : selection;
+    const QString provider = link.value("provider").toString();
+    if (provider != "jimaku" && provider != "kitsunekko")
+        return failure(tr("Choose an online subtitle for this Media Library title first."));
+    if (selection.isEmpty() && !link.value("releaseRule").toMap().value("valid").toBool())
+        return failure(tr("Choose a subtitle file once to remember its source, group and format."));
+    const qint64 episode = !selection.isEmpty()
+        ? selection.value("episode", -1).toLongLong()
+        : media.episode < 0 ? -1
+        : qint64(media.episode) + link.value("episodeOffset", 0).toLongLong();
+    if (episode < 0 || episode > 10000)
+        return failure(tr("Could not determine this episode number. Select its subtitle manually."));
+    return {{"link", link}, {"episode", int(episode)}};
+}
+
 JimakuClient::MediaInfo JimakuClient::currentMedia() const
 {
     MediaInfo result;
@@ -839,8 +870,6 @@ void JimakuClient::handleFileList(
     if (m_operation == Operation::ManualFiles)
     {
         setBrowseFiles(usableFiles(files));
-        if (m_context && m_selectedEpisode >= 0 && !m_browseFiles.isEmpty())
-            m_context->episodeLibrary()->rememberSubtitleSearch(m_selectedLink, m_selectedEpisode);
         m_operation = Operation::None;
         setBusy(false);
         if (m_browseFiles.isEmpty())

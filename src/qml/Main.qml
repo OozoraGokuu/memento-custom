@@ -207,7 +207,7 @@ ApplicationWindow {
                 searchPage.setQuery(text);
             }
             onJimakuSearchRequested: jimakuSearchDialog.openForCurrentMedia()
-            onNextSubtitleSearchRequested: jimakuSearchDialog.openNextEpisode()
+            onLinkedSubtitleSearchRequested: jimakuSearchDialog.openLinkedEpisode()
             onTorrentSearchRequested: torrentSearchDialog.openForCurrentMedia()
             onStatisticsRequested: {
                 MementoSettings.windowLibrary = true;

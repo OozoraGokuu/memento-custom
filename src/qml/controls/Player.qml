@@ -137,7 +137,7 @@ MpvPlayer {
 
     signal auxiliarySearchRequested(string text)
     signal jimakuSearchRequested()
-    signal nextSubtitleSearchRequested()
+    signal linkedSubtitleSearchRequested()
     signal torrentSearchRequested()
     signal statisticsRequested()
     signal aniListSearchRequested()
@@ -1211,7 +1211,7 @@ MpvPlayer {
             }
         }
         onJimakuSearchRequested: root.jimakuSearchRequested()
-        onNextSubtitleSearchRequested: root.nextSubtitleSearchRequested()
+        onLinkedSubtitleSearchRequested: root.linkedSubtitleSearchRequested()
         onTorrentSearchRequested: root.torrentSearchRequested()
         onStatisticsRequested: root.statisticsRequested()
         onAniListSearchRequested: root.aniListSearchRequested()

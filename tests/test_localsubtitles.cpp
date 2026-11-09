@@ -58,7 +58,8 @@ private slots:
                 QString("[Chosen] Show - 02.ja.ass"), QString("[Chosen] Show - 02.ja.srt")})
             QVERIFY(writeFile(folder.filePath(name)));
         bool ambiguous = true;
-        QCOMPARE(LocalSubtitleClient::candidateForEpisode(folder.path(), 2, rule, &ambiguous), expected);
+        QCOMPARE(LocalSubtitleClient::candidateForEpisode(folder.path(), 2, rule, &ambiguous),
+            QFileInfo(expected).canonicalFilePath());
         QVERIFY(!ambiguous);
         QVERIFY(QFile::remove(expected));
         QVERIFY(QDir().mkpath(folder.filePath("nested")));
@@ -75,16 +76,17 @@ private slots:
         {
             const QString path = folder.filePath(QString("[Chosen] Show - 02.%1").arg(extension));
             QVERIFY(writeFile(path));
-            QCOMPARE(LocalSubtitleClient::readableSubtitlePath(path), path);
+            const QString canonical = QFileInfo(path).canonicalFilePath();
+            QCOMPARE(LocalSubtitleClient::readableSubtitlePath(path), canonical);
             const auto rule = SubtitleRelease::fromFile(QString("[Chosen] Show - 01.%1").arg(extension), 1);
-            QCOMPARE(LocalSubtitleClient::candidateForEpisode(folder.path(), 2, rule), path);
+            QCOMPARE(LocalSubtitleClient::candidateForEpisode(folder.path(), 2, rule), canonical);
         }
         const QString bitmap = folder.filePath("large.sup");
         QFile file(bitmap);
         QVERIFY(file.open(QIODevice::WriteOnly));
         QVERIFY(file.resize(64 * 1024 * 1024 + 1));
         file.close();
-        QCOMPARE(LocalSubtitleClient::readableSubtitlePath(bitmap), bitmap);
+        QCOMPARE(LocalSubtitleClient::readableSubtitlePath(bitmap), QFileInfo(bitmap).canonicalFilePath());
     }
 
     void refusesAmbiguousReleaseVariants()
@@ -144,7 +146,9 @@ private slots:
         player.state()->setPath(episode);
         LocalSubtitleClient client(&context);
         client.m_mediaPath = episode;
-        client.m_pendingPath = subtitle;
+        // attach() receives the canonical path from readableSubtitlePath().
+        // macOS temporary directories may be reached through the /var alias.
+        client.m_pendingPath = QFileInfo(subtitle).canonicalFilePath();
         client.m_pendingGeneration = client.m_generation;
         client.m_link = localLink(folder.path());
         client.m_episode = 1;
@@ -166,7 +170,7 @@ private slots:
         const auto selected = context.episodeLibrary()->subtitleSelectionForFile(episode);
         QCOMPARE(selected.value("provider").toString(), QString("local"));
         QCOMPARE(selected.value("filename").toString(), QFileInfo(subtitle).fileName());
-        QCOMPARE(selected.value("cachePath").toString(), subtitle);
+        QCOMPARE(selected.value("cachePath").toString(), QFileInfo(subtitle).canonicalFilePath());
         QCOMPARE(selected.value("directory").toString(), folder.path());
         QVERIFY(!client.busy());
         context.setPlayer(nullptr);

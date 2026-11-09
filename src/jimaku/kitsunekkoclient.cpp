@@ -173,10 +173,13 @@ void KitsunekkoClient::loadCategory(int index)
     });
 }
 
-void KitsunekkoClient::resolveLinkedCatalog(const QVariantMap &link, int episode, bool force)
+void KitsunekkoClient::resolveLinkedCatalog(const QVariantMap &link, int episode,
+                                           bool force, bool automatic, bool all)
 {
     m_catalogLink = link;
     m_catalogEpisode = episode;
+    m_catalogAutomatic = automatic;
+    m_catalogAll = all;
     watchMedia();
     if (!force && loadCachedCatalog()) {
         finishLinkedCatalog(false);
@@ -189,6 +192,7 @@ void KitsunekkoClient::finishLinkedCatalog(bool fresh)
 {
     auto link = m_catalogLink;
     const int episode = m_catalogEpisode;
+    const bool automatic = m_catalogAutomatic, all = m_catalogAll;
     m_catalogLink.clear();
     m_catalogEpisode = -1;
     QString sha;
@@ -202,13 +206,13 @@ void KitsunekkoClient::finishLinkedCatalog(bool fresh)
         sha = entry.value("sha").toString();
     }
     if (sha.isEmpty()) {
-        if (!fresh) { resolveLinkedCatalog(link, episode, true); return; }
+        if (!fresh) { resolveLinkedCatalog(link, episode, true, automatic, all); return; }
         error(tr("The linked Kitsunekko title is no longer in the current catalog. Open subtitle search to choose it again."));
         return;
     }
     link.insert("sha", sha);
     m_entries = {link};
-    selectFiles(0, episode, false, false, true, fresh);
+    selectFiles(0, episode, all, false, automatic, fresh);
 }
 
 void KitsunekkoClient::filterTitles()
@@ -296,8 +300,6 @@ void KitsunekkoClient::selectFiles(int index, int episode, bool all, bool persis
             error(tr("GitHub returned an incomplete subtitle list.")); return;
         }
         m_files = parseFiles(data, entry.value("prefix").toString(), all || automatic ? -1 : episode);
-        if (m_context && episode >= 0 && !m_files.isEmpty())
-            m_context->episodeLibrary()->rememberSubtitleSearch(m_entryLink, episode);
         m_busy = false;
         if (automatic) {
             if (!m_context || !m_context->player() ||
@@ -361,13 +363,13 @@ int KitsunekkoClient::preferredFileIndex(int episode) const
                               selection.value("filename").toString());
 }
 
-void KitsunekkoClient::fetchLinkedForCurrentMedia()
+void KitsunekkoClient::fetchLinkedForCurrentMedia(bool manual)
 {
     cancel();
     if (!m_context || !m_context->player()) return;
     m_mediaPath = m_context->player()->state()->path();
     const auto seriesLink = m_context->episodeLibrary()->subtitleLinkForFile(m_mediaPath);
-    if (!seriesLink.value("autoLoad", true).toBool()) return;
+    if (!manual && !seriesLink.value("autoLoad", true).toBool()) return;
     const auto selection = m_context->episodeLibrary()->subtitleSelectionForFile(m_mediaPath);
     const auto link = selection.isEmpty() ? seriesLink : selection;
     if (link.value("provider").toString() != "kitsunekko") return;
@@ -423,8 +425,14 @@ void KitsunekkoClient::openLinkedEntry(const QVariantMap &link, int episode, boo
     if (!validLink(link)) {
         error(tr("Invalid saved Kitsunekko link. Use Change link to select the title again.")); return;
     }
+    cancel();
+    m_mediaPath = m_context && m_context->player() ? m_context->player()->state()->path() : QString();
     m_entries = {link};
-    selectFiles(0, episode, all, false);
+    m_entryLink = link;
+    m_entryName = link.value("name").toString();
+    m_episode = episode;
+    m_files.clear();
+    resolveLinkedCatalog(link, episode, false, false, all);
 }
 
 void KitsunekkoClient::attachResult(int index)
@@ -534,6 +542,8 @@ void KitsunekkoClient::checkAttached()
             {"releaseRule", rule}, {"delay", delay}};
         const bool saved = !library->containsFile(m_mediaPath) || link.isEmpty() ||
             library->rememberSubtitleSelection(m_mediaPath, link, selection);
+        if (saved && library->containsFile(m_mediaPath))
+            library->rememberSubtitleSearch(link, m_episode);
         if (m_pendingAutomatic)
             m_context->player()->controller()->setSubtitleDelay(delay);
         if (!m_pendingAutomatic) m_entryLink = link;
@@ -570,6 +580,7 @@ void KitsunekkoClient::cancel()
     disconnect(m_mediaConnection); m_mediaConnection = {};
     m_pendingPath.clear(); m_pendingFile.clear(); m_pendingSelection.clear();
     m_catalogLink.clear(); m_catalogEpisode = -1;
+    m_catalogAutomatic = true; m_catalogAll = false;
     m_pendingAutomatic = false; m_busy = false; emit changed();
 }
 void KitsunekkoClient::clearSearch()

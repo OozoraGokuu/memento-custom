@@ -4,20 +4,20 @@
 #include <QString>
 #include <QVariantMap>
 
-/** Conservative filename rules for a manually selected subtitle release. */
+/** Episode-independent identity for a manually selected subtitle release. */
 namespace SubtitleRelease
 {
 
 /**
- * Keep every part of the filename except one confidently identified episode
- * number and trailing CRC tags. An unnumbered or ambiguous filename gets an
- * exact rule, which is usable only for this same filename and episode.
- * Relative directories, season, group, language, variant and extension remain
- * part of the identity. An empty map means the filename is invalid.
+ * Remember the format, source-relative directory, group tags and explicit
+ * season/language/variant metadata. Parse the episode separately so spacing,
+ * episode markers and free episode titles can vary. Unnumbered or ambiguous
+ * names remain exact-only. Callers must constrain candidates to the linked
+ * source and refuse multiple matching files. An empty map means invalid input.
  */
 QVariantMap fromFile(const QString &name, int episode);
 
-/** Match the requested episode without guessing another release or group. */
+/** Match the episode and release identity, including validated version-1 rules. */
 bool matches(const QString &name, int episode, const QVariantMap &rule);
 
 } // namespace SubtitleRelease

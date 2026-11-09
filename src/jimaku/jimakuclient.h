@@ -98,6 +98,9 @@ public:
     /** Suggested episode parsed from the currently playing media. */
     [[nodiscard]] Q_INVOKABLE int suggestedEpisode() const;
 
+    /** Resolve the saved online subtitle source for the playing episode. */
+    [[nodiscard]] Q_INVOKABLE QVariantMap linkedSubtitleTarget() const;
+
 signals:
     void apiKeyChanged();
     void autoFetchChanged(bool value);

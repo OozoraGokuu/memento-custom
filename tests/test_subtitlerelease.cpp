@@ -13,7 +13,7 @@ private slots:
     {
         const auto rule = SubtitleRelease::fromFile(
             "[Group2] 86 S01E05 [1080p][ABCDEF01].ja.ass", 5);
-        QCOMPARE(rule.value("mode").toString(), QString("template"));
+        QCOMPARE(rule.value("mode").toString(), QString("release"));
         QVERIFY(SubtitleRelease::matches("[Group2] 86 S01E06 [1080p][1234ABCD].ja.ass", 6, rule));
         QVERIFY(!SubtitleRelease::matches("[Other] 86 S01E06 [1080p][1234ABCD].ja.ass", 6, rule));
         QVERIFY(!SubtitleRelease::matches("[Group3] 86 S01E06 [1080p][1234ABCD].ja.ass", 6, rule));
@@ -49,7 +49,7 @@ private slots:
         QFETCH(QString, selected);
         QFETCH(QString, next);
         const auto rule = SubtitleRelease::fromFile(selected, 5);
-        QCOMPARE(rule.value("mode").toString(), QString("template"));
+        QCOMPARE(rule.value("mode").toString(), QString("release"));
         QVERIFY(SubtitleRelease::matches(next, 6, rule));
         QVERIFY(!SubtitleRelease::matches(next, 7, rule));
     }
@@ -59,7 +59,7 @@ private slots:
         const auto rule = SubtitleRelease::fromFile("[GROUP] Café - ０５.JA.ASS", 5);
         QVERIFY(SubtitleRelease::matches("[group] Cafe\u0301-06 . ja . ass", 6, rule));
         QVERIFY(!SubtitleRelease::matches("[group] Cafe-06.ja.ass", 6, rule));
-        QVERIFY(!SubtitleRelease::matches("[group] Café_06.ja.ass", 6, rule));
+        QVERIFY(SubtitleRelease::matches("[group] Café_06.ja.ass", 6, rule));
         const auto spacedGroup = SubtitleRelease::fromFile("[Group A] Show - 05.ass", 5);
         QVERIFY(!SubtitleRelease::matches("[GroupA] Show - 06.ass", 6, spacedGroup));
     }
@@ -108,6 +108,137 @@ private slots:
         QVERIFY(!SubtitleRelease::matches(changed, 6, rule));
     }
 
+    void episodeTitlesAndSpacingAreIndependent_data()
+    {
+        QTest::addColumn<QString>("selected");
+        QTest::addColumn<QString>("next");
+        QTest::newRow("user-example") << "EP 1.ASS" << "EP2.ASS";
+        QTest::newRow("marker-and-title") << "[Group] Show EP 1 - First morning.ass"
+            << "[Group] Show Episode2 - A different day.ass";
+        QTest::newRow("episode-only-title") << "EP1 - First.ass" << "E02 - Second.ass";
+        QTest::newRow("leading-number") << "01 - First.ass" << "02 - Second.ass";
+        QTest::newRow("spaces") << "Show 01.ass" << "Show_02.ass";
+        QTest::newRow("plain-with-tags") << "[Group] Show 01 [1080p].ja.ass"
+            << "[Group] Show_02 [1080p].ja.ass";
+        QTest::newRow("plain-with-revision") << "[Group] Show 01v2.ass"
+            << "[Group] Show 02v2.ass";
+        QTest::newRow("season-padding") << "[Group] Show S1E1 - First.ass"
+            << "[Group] Show S01E02 - Second.ass";
+        QTest::newRow("episode-metadata") << "[Group] Show - 1 - First [1080p].ja.ass"
+            << "[Group] Show E02 - Second [1080p].ja.ass";
+        QTest::newRow("relative-directory") << "Selected group/EP 1.ass"
+            << "Selected group/EP2 - Episode title.ass";
+    }
+
+    void episodeTitlesAndSpacingAreIndependent()
+    {
+        QFETCH(QString, selected); QFETCH(QString, next);
+        const auto rule = SubtitleRelease::fromFile(selected, 1);
+        QCOMPARE(rule.value("version").toInt(), 2);
+        QCOMPARE(rule.value("mode").toString(), QString("release"));
+        QVERIFY(SubtitleRelease::matches(next, 2, rule));
+        QVERIFY(!SubtitleRelease::matches(next, 1, rule));
+    }
+
+    void sourceFormatAndGroupBoundaries()
+    {
+        const auto rule = SubtitleRelease::fromFile("Group/EP 1.ASS", 1);
+        QVERIFY(SubtitleRelease::matches("Group/EP2.ASS", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Group/EP2.SRT", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Other/EP2.ASS", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Group/[Other] EP2.ASS", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Group/EP2.ASS", 3, rule));
+        // A failed attempt must not consume or advance the saved release.
+        QVERIFY(SubtitleRelease::matches("Group/EP2.ASS", 2, rule));
+        const auto tagged = SubtitleRelease::fromFile("[Chosen] EP 1.ass", 1);
+        QVERIFY(SubtitleRelease::matches("[Chosen] EP2 - New title.ass", 2, tagged));
+        QVERIFY(!SubtitleRelease::matches("[Other] EP2 - New title.ass", 2, tagged));
+        QVERIFY(!SubtitleRelease::matches("EP2 - New title.ass", 2, tagged));
+    }
+
+    void duplicateCandidatesRemainAmbiguous()
+    {
+        const auto rule = SubtitleRelease::fromFile("[Chosen] EP 1.ass", 1);
+        const QStringList files{"[Chosen] EP2 - First title.ass", "[Chosen] EP 2 - Alternate.ass",
+            "[Chosen] EP2.srt", "[Other] EP2.ass", "[Chosen] EP3.ass"};
+        int matches = 0;
+        for (const auto &file : files)
+            if (SubtitleRelease::matches(file, 2, rule)) ++matches;
+        // Provider/local selectors reject two candidates, instead of preferring
+        // one due to spacing or an arbitrary episode-title similarity score.
+        QCOMPARE(matches, 2);
+    }
+
+    void explicitMetadataCannotChange()
+    {
+        const auto language = SubtitleRelease::fromFile("EP1 - First.ja-JP.ass", 1);
+        QVERIFY(SubtitleRelease::matches("EP2 - Second.ja-jp.ass", 2, language));
+        QVERIFY(!SubtitleRelease::matches("EP2 - Second.en-us.ass", 2, language));
+        QVERIFY(!SubtitleRelease::matches("EP2 - Second.ass", 2, language));
+        const auto technical = SubtitleRelease::fromFile("Show EP1 - First 1080p Japanese.ass", 1);
+        QVERIFY(SubtitleRelease::matches("Show EP2 - Second 1080p Japanese.ass", 2, technical));
+        QVERIFY(!SubtitleRelease::matches("Show EP2 - Second 720p Japanese.ass", 2, technical));
+        QVERIFY(!SubtitleRelease::matches("Show EP2 - Second 1080p English.ass", 2, technical));
+        const auto variant = SubtitleRelease::fromFile("Show EP1 - First.signs.ass", 1);
+        QVERIFY(!SubtitleRelease::matches("Show EP2 - Second.dialogue.ass", 2, variant));
+        const auto season = SubtitleRelease::fromFile("Show S1E1 - First.ass", 1);
+        QVERIFY(!SubtitleRelease::matches("Show S2E2 - Second.ass", 2, season));
+        QVERIFY(!SubtitleRelease::matches("Show EP2 - Second.ass", 2, season));
+    }
+
+    void explicitTrailingTrackVariants()
+    {
+        const QStringList variants{"Signs", "Dialogue", "Full", "Songs"};
+        for (const auto &selected : variants)
+        {
+            const auto rule = SubtitleRelease::fromFile("[Chosen] Show EP1 - First " + selected + ".ass", 1);
+            for (const auto &candidate : variants)
+                QCOMPARE(SubtitleRelease::matches("[Chosen] Show EP2 - Second " + candidate + ".ass", 2, rule),
+                         selected == candidate);
+            QVERIFY(SubtitleRelease::matches("[Chosen] Show EP2 - Second." + selected + ".ass", 2, rule));
+            QVERIFY(!SubtitleRelease::matches("[Chosen] Show EP2 - Second.ass", 2, rule));
+        }
+        const auto language = SubtitleRelease::fromFile("[Chosen] EP1 - First Signs ja.ass", 1);
+        QVERIFY(SubtitleRelease::matches("[Chosen] EP2 - Second.Signs.ja.ass", 2, language));
+        QVERIFY(!SubtitleRelease::matches("[Chosen] EP2 - Second Signs en.ass", 2, language));
+        QVERIFY(!SubtitleRelease::matches("[Chosen] EP2 - Second Dialogue ja.ass", 2, language));
+        const auto fullTitle = SubtitleRelease::fromFile("[Chosen] Show EP1 - Full Moon.ass", 1);
+        QVERIFY(SubtitleRelease::matches("[Chosen] Show EP2 - New Day.ass", 2, fullTitle));
+    }
+
+    void explicitRangesNeverSelectAnIntegerEpisode()
+    {
+        for (const auto &name : {QStringLiteral("Show EP1~2.ass"),
+                                QStringLiteral("Show EP1–2.ass"),
+                                QStringLiteral("Show EP1 - 2.ass")})
+        {
+            const auto rule = SubtitleRelease::fromFile(name, 1);
+            QCOMPARE(rule.value("mode").toString(), QString("exact"));
+            QVERIFY(SubtitleRelease::matches(name, 1, rule));
+            QVERIFY(!SubtitleRelease::matches("Show EP3.ass", 3, rule));
+            QVERIFY(!SubtitleRelease::matches(name, 2, rule));
+        }
+    }
+
+    void savedVersionOneRulesUpgradeWithoutLosingGroup()
+    {
+        QVariantMap legacy{{"version", 1}, {"valid", true}, {"sampleName", "EP 1.ASS"},
+            {"episode", 1}, {"mode", "template"}, {"pattern", QString("ep ") + QChar(1) + ".ass"}};
+        QVERIFY(SubtitleRelease::matches("EP2.ASS", 2, legacy));
+        QVERIFY(!SubtitleRelease::matches("EP2.SRT", 2, legacy));
+        legacy = {{"version", 1}, {"valid", true}, {"sampleName", "[Chosen] Show - 01 - First.ass"},
+            {"episode", 1}, {"mode", "template"},
+            {"pattern", QString("[chosen]show-") + QChar(1) + "-first.ass"}};
+        QVERIFY(SubtitleRelease::matches("[Chosen] Show EP2 - Second.ass", 2, legacy));
+        QVERIFY(!SubtitleRelease::matches("[Other] Show EP2 - Second.ass", 2, legacy));
+        legacy["pattern"] = "changed";
+        QVERIFY(!SubtitleRelease::matches("[Chosen] Show EP2.ass", 2, legacy));
+        legacy = {{"version", 1}, {"valid", true}, {"sampleName", "[Group] Show Japanese.ass"},
+            {"episode", 1}, {"mode", "exact"}, {"pattern", "[group]show japanese.ass"}};
+        QVERIFY(SubtitleRelease::matches("[Group] Show Japanese.ass", 1, legacy));
+        QVERIFY(!SubtitleRelease::matches("[Group] Show Japanese.ass", 2, legacy));
+    }
+
     void unknownEpisodeDoesNotGuess()
     {
         const auto rule = SubtitleRelease::fromFile("Show - 05.ass", 0);
@@ -126,7 +257,7 @@ private slots:
         rule["pattern"] = ".*";
         QVERIFY(!SubtitleRelease::matches("Show - 06.ass", 6, rule));
         rule = original;
-        rule["version"] = 2;
+        rule["version"] = 99;
         QVERIFY(!SubtitleRelease::matches("Show - 06.ass", 6, rule));
         rule = original;
         rule["valid"] = false;

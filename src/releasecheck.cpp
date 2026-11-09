@@ -275,10 +275,11 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
             const auto *primary = context.subtitleLists()->primary();
             if (++ticks > 250) {
                 timer->stop();
-                fail(QString("Timed out waiting for video/subtitle/export (phase=%1, position=%2, sid=%3, primary=%4, cue=%5, clipboard=%6).")
+                fail(QString("Timed out waiting for video/subtitle/export (phase=%1, position=%2, sid=%3, primary=%4, cue=%5, clipboard=%6, indexed=%7).")
                     .arg(phase).arg(state->timePosition()).arg(state->sid())
                     .arg(primary ? primary->activeText() : QStringLiteral("missing"))
-                    .arg(state->subtitle()->text()).arg(QGuiApplication::clipboard()->text()));
+                    .arg(state->subtitle()->text()).arg(QGuiApplication::clipboard()->text())
+                    .arg(primary && primary->fullTimelineReady()));
                 return;
             }
             if (phase == 0) {
@@ -292,13 +293,9 @@ void runReleaseCheck(Context &context, QQmlApplicationEngine &engine)
             } else if (phase == 2 && state->pause() && state->timePosition() > 1.2 &&
                        state->timePosition() < 1.8 && primary &&
                        !primary->activeText().isEmpty()) {
-                // mpv's position and subtitle properties arrive separately after
-                // a seek. Wait for the same cue source the exporter will read.
-                const auto *cue = state->subtitle();
-                if (!primary->fullTimelineReady() &&
-                    (cue->text().trimmed().isEmpty() ||
-                     cue->startTime() > state->timePosition() ||
-                     cue->endTime() <= state->timePosition())) return;
+                // The fixture embeds its text track: require complete indexing
+                // so a missing standalone extractor cannot pass on live cues alone.
+                if (!primary->fullTimelineReady()) return;
                 if (QGuiApplication::clipboard()->text() != primary->activeText()) return;
                 if (!*observedLoading || player->loading() || player->buffering()) { fail("Episode loading state did not start and clear around playback."); return; }
                 phase = 3;

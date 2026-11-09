@@ -42,6 +42,10 @@ plist="$bundle/Contents/Info.plist"
 
 test -d "$bundle"
 test -x "$executable"
+test -x "$bundle/Contents/MacOS/ffmpeg"
+test -s "$bundle/Contents/Resources/licenses/FFmpeg-license.txt"
+test -s "$bundle/Contents/Resources/licenses/FFmpeg-build.txt"
+test -s "$bundle/Contents/Resources/licenses/FFmpeg-GPL-2.0.txt"
 file "$executable" | grep -q "Mach-O.*$expected_arch"
 codesign --verify --deep --strict --verbose=2 "$bundle"
 python3 "$repo_root/.github/scripts/verify-macos-bundle.py" \
@@ -51,6 +55,7 @@ python3 "$repo_root/.github/scripts/verify-macos-bundle.py" \
 python_executable=$(command -v python3)
 unset QT_PLUGIN_PATH QML2_IMPORT_PATH QML_IMPORT_PATH DYLD_LIBRARY_PATH DYLD_FRAMEWORK_PATH
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+"$bundle/Contents/MacOS/ffmpeg" -version >/dev/null
 "$executable" --help | grep -q '^Usage: memento'
 "$python_executable" - "$executable" <<'PY'
 import subprocess

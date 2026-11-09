@@ -96,6 +96,17 @@ private slots:
         QCOMPARE(client.m_mediaPath, next);
         QCOMPARE(client.selectedEntryName(), QString("Chosen Show"));
         client.cancel();
+        auto manualLink = link;
+        manualLink.insert("autoLoad", false);
+        QVERIFY(context.episodeLibrary()->setSubtitleLinkForFile(next, manualLink));
+        client.fetchLinkedForCurrentMedia();
+        QVERIFY(!client.m_reply);
+        for (int retry = 0; retry < 2; ++retry) {
+            client.fetchLinkedForCurrentMedia(true);
+            QVERIFY(client.m_reply);
+            QCOMPARE(client.selectedEpisode(), 24);
+            client.cancel();
+        }
         context.setPlayer(nullptr);
     }
 
@@ -126,6 +137,18 @@ private slots:
         QCOMPARE(client.m_entryLink.value("preferredFile"), link.value("preferredFile"));
         QCOMPARE(context.episodeLibrary()->subtitleLinkForFile(video.fileName()), link);
         client.cancel();
+
+        // Manual fallback must browse the resolved catalog, even when the
+        // dialog still holds the original saved link with its older tree SHA.
+        for (const bool all : {false, true}) {
+            client.openLinkedEntry(link, 24, all);
+            QVERIFY(client.m_reply);
+            QVERIFY(client.m_reply->url().path().endsWith("/git/trees/" + QString(40, 'b')));
+            QCOMPARE(client.selectedEpisode(), 24);
+            QCOMPARE(client.m_entryLink.value("releaseRule"), link.value("releaseRule"));
+            QCOMPARE(client.m_entryLink.value("preferredFile"), link.value("preferredFile"));
+            client.cancel();
+        }
 
         // Missing new episodes retry the current catalog once, preserving the
         // release while following the exact same directory, not similar titles.
@@ -162,6 +185,19 @@ private slots:
             other.value("name").toString()), 0);
         QCOMPARE(KitsunekkoClient::automaticFileIndex({next}, 24, rule,
             other.value("name").toString()), -1);
+    }
+
+    void linkedEpisodeKeepsAssFormatAcrossFilenameSpacing()
+    {
+        const auto rule = SubtitleRelease::fromFile("EP 1.ASS", 1);
+        const QVariantMap first{{"name", "EP 1.ASS"}},
+            firstSrt{{"name", "EP1.SRT"}},
+            nextSrt{{"name", "EP2.SRT"}},
+            nextAss{{"name", "EP2.ASS"}},
+            duplicate{{"name", "EP 2.ASS"}};
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({first, firstSrt, nextSrt, nextAss}, 2, rule), 3);
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({first, firstSrt, nextSrt}, 2, rule), -1);
+        QCOMPARE(KitsunekkoClient::automaticFileIndex({nextAss, duplicate}, 2, rule), -1);
     }
 
     void legacyLinkNeedsAnExplicitRelease()
@@ -311,15 +347,18 @@ private slots:
         context.setPlayer(nullptr);
     }
 
-    void linkedTitleBypassesCatalog()
+    void linkedTitleResolvesCurrentCatalogAndFailsSafely()
     {
         KitsunekkoClient client(nullptr);
         QSignalSpy failed(&client, &KitsunekkoClient::failed);
+        client.m_catalog = {QVariantMap{{"provider", "kitsunekko"}, {"name", "Show"},
+            {"sha", QString(40, 'b')}, {"prefix", "subtitles/anime_tv/Show/"}}};
+        client.m_catalogFetched = QDateTime::currentDateTime();
         client.openLinkedEntry({{"provider", "kitsunekko"}, {"name", "Show"},
             {"sha", QString(40, 'a')}, {"prefix", "subtitles/anime_tv/Show/"}}, 23);
-        QVERIFY(client.m_catalog.isEmpty());
+        QCOMPARE(client.m_catalog.size(), 1);
         QVERIFY(client.m_reply);
-        QVERIFY(client.m_reply->url().path().endsWith("/git/trees/" + QString(40, 'a')));
+        QVERIFY(client.m_reply->url().path().endsWith("/git/trees/" + QString(40, 'b')));
         QCOMPARE(client.selectedEpisode(), 23);
         QCOMPARE(client.selectedEntryName(), QString("Show"));
         client.cancel();

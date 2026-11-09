@@ -411,6 +411,12 @@ QCoro::Task<void> SubtitleListManager::readEmbeddedSubtitles(
 #ifdef Q_OS_WIN
             const QString ffmpegProgram = QDir(
                 QCoreApplication::applicationDirPath()).filePath("ffmpeg.exe");
+#elif defined(Q_OS_MACOS)
+            const QString bundledFfmpeg = QDir(
+                QCoreApplication::applicationDirPath()).filePath("ffmpeg");
+            // Staged apps carry this helper; development builds may use PATH.
+            const QString ffmpegProgram = QFileInfo(bundledFfmpeg).isExecutable() ?
+                bundledFfmpeg : QStringLiteral("ffmpeg");
 #else
             const QString ffmpegProgram = "ffmpeg";
 #endif

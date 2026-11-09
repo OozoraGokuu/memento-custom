@@ -1,6 +1,7 @@
 #include "manager/subtitlelistmanager.h"
 #include <QTemporaryDir>
 #include <QDir>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -258,6 +259,11 @@ private slots:
     {
         Context context;
         MpvPlayer player;
+        // This test supplies its own track state. On macOS the renderer starts
+        // libmpv asynchronously even without a window; its initial empty track
+        // observations must not replace the synthetic state while parsing.
+        QObject::disconnect(&player, &MpvPlayer::mpvEvent, &player, nullptr);
+        QCoreApplication::sendPostedEvents(&player, QEvent::MetaCall);
         context.setPlayer(&player);
         SubtitleListManager manager(&context);
         QTemporaryDir folder;
