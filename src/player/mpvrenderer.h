@@ -55,11 +55,15 @@ public:
     /**
      * @brief Renders the data from mpv to the framebuffer.
      */
-    void render();
+    void render() override;
+    void synchronize(QQuickFramebufferObject *item) override;
 
 private:
     /* The player that created this framebuffer */
     MpvPlayer *m_player{nullptr};
+
+    // Captured during synchronization while the GUI thread is blocked.
+    QQuickWindow *m_window{nullptr};
 
     /* Shared mpv render core */
     MpvFrameBackend m_frameBackend;

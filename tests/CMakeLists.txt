@@ -161,3 +161,9 @@ target_compile_options(memento_videoexport_tests PRIVATE ${MEMENTO_COMPILER_FLAG
 target_include_directories(memento_videoexport_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
 target_link_libraries(memento_videoexport_tests PRIVATE context Qt6::Test)
 add_test(NAME video-export-clips COMMAND memento_videoexport_tests)
+
+if(APPLE)
+    set_tests_properties(video-export-clips PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+else()
+    set_tests_properties(video-export-clips PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()

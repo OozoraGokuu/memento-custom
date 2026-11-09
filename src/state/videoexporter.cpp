@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -16,6 +17,8 @@
 VideoExporter::VideoExporter(Context *context, QObject *parent)
     : QObject(parent), m_context(context)
 {
+    connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+        this, &VideoExporter::clearPreview);
     m_timer.setInterval(200);
     connect(&m_timer, &QTimer::timeout, this, [this] {
         m_progress = m_control->progress.load();
@@ -27,10 +30,23 @@ VideoExporter::VideoExporter(Context *context, QObject *parent)
         const bool ok = result.value("ok").toBool();
         m_busy = false;
         m_progress = ok ? 1.0 : 0.0;
-        m_outputPath = result.value("path").toString();
-        m_status = ok ? tr("Saved video to %1").arg(m_outputPath) : result.value("error").toString();
+        if (m_previewJob)
+        {
+            const QString path = result.value("path").toString();
+            if (m_discardPreview) QFile::remove(path);
+            else if (ok) m_previewPath = path;
+            m_status = m_discardPreview ? tr("Preview cleared.") :
+                ok ? tr("Preview ready.") : result.value("error").toString();
+            m_previewJob = false;
+            emit previewChanged();
+        }
+        else
+        {
+            m_outputPath = result.value("path").toString();
+            m_status = ok ? tr("Saved video to %1").arg(m_outputPath) : result.value("error").toString();
+        }
         emit changed();
-        emit finished(ok, m_status);
+        emit finished(ok && !m_discardPreview, m_status);
     });
 }
 
@@ -84,6 +100,18 @@ QString VideoExporter::destination() const
 bool VideoExporter::start(const QString &mediaPath, double start, double end,
     int maxHeight, int quality, int primaryId, int secondaryId, bool audio)
 {
+    return run(mediaPath, start, end, maxHeight, quality, primaryId, secondaryId, audio, false);
+}
+
+bool VideoExporter::preview(const QString &mediaPath, double start, double end,
+    int maxHeight, int quality, int primaryId, int secondaryId, bool audio)
+{
+    return run(mediaPath, start, end, maxHeight, quality, primaryId, secondaryId, audio, true);
+}
+
+bool VideoExporter::run(const QString &mediaPath, double start, double end,
+    int maxHeight, int quality, int primaryId, int secondaryId, bool audio, bool preview)
+{
     if (m_busy) return false;
     const auto reject = [this](const QString &message) {
         m_status = message;
@@ -113,9 +141,23 @@ bool VideoExporter::start(const QString &mediaPath, double start, double end,
     if ((primaryId > 0 && !context.primarySubtitle.valid()) ||
         (secondaryId > 0 && !context.secondarySubtitle.valid()))
         return reject(tr("A selected subtitle track is no longer available."));
-    const QString folder = destination();
-    if (folder.isEmpty() || !QDir().mkpath(folder))
-        return reject(tr("Could not create the export folder in Pictures."));
+    QString folder;
+    if (preview)
+    {
+        clearPreview();
+        if (!m_previewDirectory || !m_previewDirectory->isValid())
+            m_previewDirectory = std::make_unique<QTemporaryDir>(
+                QDir::tempPath() + "/memento-preview-XXXXXX");
+        if (!m_previewDirectory->isValid())
+            return reject(tr("Could not create a temporary preview folder."));
+        folder = m_previewDirectory->path();
+    }
+    else
+    {
+        folder = destination();
+        if (folder.isEmpty() || !QDir().mkpath(folder))
+            return reject(tr("Could not create the export folder in Pictures."));
+    }
     const auto info = m_context->episodeLibrary()->playbackInfo(mediaPath);
     const QString episode = info.value("filename").toString();
     const QString stem = DirectoryUtils::safeMediaName(QFileInfo(episode.isEmpty() ? mediaPath : episode).completeBaseName(), "Video");
@@ -144,19 +186,21 @@ bool VideoExporter::start(const QString &mediaPath, double start, double end,
     args.end = end;
     args.audio = audio && context.aid > 0;
     args.subtitles = primaryId > 0 || secondaryId > 0;
-    m_status = tr("Exporting selected section…");
-    m_outputPath.clear();
+    m_previewJob = preview;
+    m_discardPreview = false;
+    m_status = preview ? tr("Preparing preview…") : tr("Exporting selected section…");
+    if (!preview) m_outputPath.clear();
     m_progress = 0.0;
     m_busy = true;
     emit changed();
     m_timer.start();
-    m_watcher.setFuture(QtConcurrent::run([context, args, options, output]() -> QVariantMap {
+    m_watcher.setFuture(QtConcurrent::run([context, args, options, output, preview]() -> QVariantMap {
         const QString encoded = MpvController::encodeVideoClip(context, args, {}, false, false, &options);
         if (encoded.isEmpty() || options.control->cancel.load())
         {
             QFile::remove(options.outputPath);
             return {{"ok", false}, {"error", options.control->cancel.load() ?
-                tr("Export cancelled.") : (options.control->error.isEmpty() ?
+                (preview ? tr("Preview cancelled.") : tr("Export cancelled.")) : (options.control->error.isEmpty() ?
                     tr("Could not export the selected section.") : options.control->error)}};
         }
         if (!QFile::rename(encoded, output))
@@ -169,12 +213,31 @@ bool VideoExporter::start(const QString &mediaPath, double start, double end,
     return true;
 }
 
+void VideoExporter::clearPreview()
+{
+    if (preparingPreview())
+    {
+        m_discardPreview = true;
+        cancel();
+    }
+    const QString previous = m_previewPath;
+    m_previewPath.clear();
+    if (!m_busy && !previous.isEmpty())
+    {
+        m_status.clear();
+        emit changed();
+    }
+    emit previewChanged();
+    // Let the QML player unload first; Windows cannot delete an open video.
+    if (!previous.isEmpty()) QTimer::singleShot(0, this, [previous] { QFile::remove(previous); });
+}
+
 void VideoExporter::cancel()
 {
     if (m_busy && m_control)
     {
         m_control->cancel.store(true);
-        m_status = tr("Cancelling export…");
+        m_status = m_previewJob ? tr("Cancelling preview…") : tr("Cancelling export…");
         emit changed();
     }
 }

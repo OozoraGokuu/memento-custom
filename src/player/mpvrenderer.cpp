@@ -40,12 +40,21 @@ QOpenGLFramebufferObject *MpvRenderer::createFramebufferObject(
     return QQuickFramebufferObject::Renderer::createFramebufferObject(size);
 }
 
+void MpvRenderer::synchronize(QQuickFramebufferObject *item)
+{
+    m_window = item->window();
+}
+
 void MpvRenderer::render()
 {
-    m_player->window()->beginExternalCommands();
+    // A popup can detach its items while a final render is still queued.
+    // Do not read item->window() from this render callback: it can become null
+    // between beginExternalCommands() and endExternalCommands().
+    if (!m_window) return;
+    m_window->beginExternalCommands();
 
     QOpenGLFramebufferObject *fbo = framebufferObject();
     m_frameBackend.renderToFramebuffer(fbo->handle(), fbo->size());
 
-    m_player->window()->endExternalCommands();
+    m_window->endExternalCommands();
 }

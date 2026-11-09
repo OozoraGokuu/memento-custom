@@ -6,6 +6,8 @@ add_library(
     mpvframebackend.h
     mpvplayer.cpp
     mpvplayer.h
+    mpvpreview.cpp
+    mpvpreview.h
     mpvrenderer.cpp
     mpvrenderer.h
     mpvstate.cpp

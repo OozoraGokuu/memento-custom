@@ -68,6 +68,7 @@ qt_add_qml_module(
         qml/controls/PlayerControls.qml
         qml/controls/PlayerMenu.qml
         qml/controls/ExportVideoDialog.qml
+        qml/controls/ExportVideoPreview.qml
         qml/controls/PlayerOcrOverlay.qml
         qml/controls/PlayerSlider.qml
         qml/controls/PlayerThumbnail.qml

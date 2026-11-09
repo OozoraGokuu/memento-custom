@@ -9,7 +9,7 @@ Dialog {
     required property MpvPlayer player
     parent: Overlay.overlay
     anchors.centerIn: parent
-    width: Math.min(650, parent.width - 32)
+    width: Math.min(1100, parent.width - 32)
     height: Math.min(implicitHeight, parent.height - 32)
     title: qsTr("Export Video")
     modal: true
@@ -32,6 +32,26 @@ Dialog {
             maxHeight, quality.currentIndex, audio.checked && audioId > 0);
     }
 
+    readonly property bool validSelection: !!estimate.valid && !mediaChanged &&
+        !(primary.currentValue > 0 && primary.currentValue === secondary.currentValue)
+    readonly property string previewSelection: JSON.stringify([
+        mediaPath, startSeconds, endSeconds, maxHeight, quality.currentIndex,
+        primary.currentValue, secondary.currentValue, audio.checked,
+        player.state.aid, player.state.vid, player.state.subtitle.delay,
+        player.state.secondarySubtitle.delay])
+    onPreviewSelectionChanged: invalidatePreview()
+    onMediaChangedChanged: { if (mediaChanged) invalidatePreview(); }
+    onAboutToHide: invalidatePreview()
+    function invalidatePreview() {
+        previewPane.pause();
+        if (VideoExporter.previewPath.length || VideoExporter.preparingPreview)
+            VideoExporter.clearPreview();
+    }
+    Connections {
+        target: root.player.state
+        function onSubtitleTracksChanged() { root.invalidatePreview(); }
+    }
+
     function formatTime(value) {
         let ms = Math.round(Math.max(0, value) * 1000);
         let h = Math.floor(ms / 3600000);
@@ -48,6 +68,7 @@ Dialog {
     }
     function prepare() {
         if (VideoExporter.busy) { open(); return; }
+        invalidatePreview();
         mediaPath = player.state.path;
         folder = VideoExporter.destination();
         const duration = player.state.duration;
@@ -74,73 +95,96 @@ Dialog {
         clip: true
         contentWidth: availableWidth
         implicitHeight: form.implicitHeight
-        ColumnLayout {
+        GridLayout {
             id: form
             width: parent.width
-            spacing: 14
-            Label { text: qsTr("Selected section"); font.bold: true }
-            GridLayout {
+            columns: root.width >= 920 ? 2 : 1
+            columnSpacing: 24
+            rowSpacing: 20
+            ColumnLayout {
                 Layout.fillWidth: true
-                columns: 3
-                enabled: !VideoExporter.busy && !root.mediaChanged
-                Label { text: qsTr("Start") }
-                TextField { id: startField; objectName: "exportStart"; Layout.fillWidth: true; placeholderText: "00:00:00.000"; selectByMouse: true; Accessible.name: qsTr("Section start time") }
-                Button { text: qsTr("Use current time"); onClicked: startField.text = root.formatTime(root.player.state.timePosition) }
-                Label { text: qsTr("End") }
-                TextField { id: endField; objectName: "exportEnd"; Layout.fillWidth: true; placeholderText: "00:00:10.000"; selectByMouse: true; Accessible.name: qsTr("Section end time") }
-                Button { text: qsTr("Use current time"); onClicked: endField.text = root.formatTime(root.player.state.timePosition) }
-            }
-            Label {
-                Layout.fillWidth: true
-                text: root.mediaChanged ? qsTr("The video changed. Close and reopen this dialog to select a new section.") :
-                    root.estimate.valid ? qsTr("%1 seconds selected · hours:minutes:seconds.milliseconds").arg(root.estimate.seconds.toFixed(2)) : root.estimate.error
-                wrapMode: Text.Wrap
-                color: root.estimate.valid && !root.mediaChanged ? palette.text : "#e9a36b"
-            }
-            GridLayout {
-                columns: 2
-                Layout.fillWidth: true
-                enabled: !VideoExporter.busy && !root.mediaChanged
-                Label { text: qsTr("Resolution") }
-                ComboBox { id: resolution; Layout.fillWidth: true; model: [qsTr("Original"), "1080p", "720p", "480p"] }
-                Label { text: qsTr("Quality") }
-                ComboBox { id: quality; Layout.fillWidth: true; model: [qsTr("Compact"), qsTr("Balanced"), qsTr("High")]; currentIndex: 1 }
-                Label { text: qsTr("Primary subtitles") }
-                ComboBox { id: primary; Layout.fillWidth: true; model: root.tracks; textRole: "text"; valueRole: "trackId" }
-                Label { text: qsTr("Secondary subtitles") }
-                ComboBox { id: secondary; Layout.fillWidth: true; model: root.tracks; textRole: "text"; valueRole: "trackId" }
-                Label { text: qsTr("Audio") }
-                CheckBox { id: audio; text: qsTr("Include selected audio track"); enabled: root.player.state.aid > 0 }
-            }
-            Label { Layout.fillWidth: true; text: qsTr("Selected subtitles are permanently visible in the exported video. Choose None for both to export without subtitles. Playback subtitle delays are applied."); wrapMode: Text.Wrap; opacity: 0.75 }
-            Frame {
-                Layout.fillWidth: true
-                ColumnLayout {
-                    anchors.fill: parent
-                    Label { text: root.estimate.valid ? qsTr("Estimated size: %1 MB").arg(root.estimate.sizeMB.toFixed(1)) : qsTr("Estimated size: —"); font.bold: true; font.pixelSize: 18 }
-                    Label { text: root.estimate.valid ? qsTr("MP4 · H.264 · %1 × %2 · size may vary").arg(root.estimate.width).arg(root.estimate.height) : qsTr("MP4 · H.264"); opacity: 0.75 }
-                    Label { text: qsTr("Save to: %1").arg(root.folder); wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                Layout.preferredWidth: 520
+                Layout.alignment: Qt.AlignTop
+                spacing: 14
+                Label { text: qsTr("Selected section"); font.bold: true }
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 3
+                    enabled: !VideoExporter.busy && !root.mediaChanged
+                    Label { text: qsTr("Start") }
+                    TextField { id: startField; objectName: "exportStart"; Layout.fillWidth: true; placeholderText: "00:00:00.000"; selectByMouse: true; Accessible.name: qsTr("Section start time") }
+                    Button { text: qsTr("Use current time"); onClicked: startField.text = root.formatTime(root.player.state.timePosition) }
+                    Label { text: qsTr("End") }
+                    TextField { id: endField; objectName: "exportEnd"; Layout.fillWidth: true; placeholderText: "00:00:10.000"; selectByMouse: true; Accessible.name: qsTr("Section end time") }
+                    Button { text: qsTr("Use current time"); onClicked: endField.text = root.formatTime(root.player.state.timePosition) }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: root.mediaChanged ? qsTr("The video changed. Close and reopen this dialog to select a new section.") :
+                        root.estimate.valid ? qsTr("%1 seconds selected · hours:minutes:seconds.milliseconds").arg(root.estimate.seconds.toFixed(2)) : root.estimate.error
+                    wrapMode: Text.Wrap
+                    color: root.estimate.valid && !root.mediaChanged ? palette.text : "#e9a36b"
+                }
+                GridLayout {
+                    columns: 2
+                    Layout.fillWidth: true
+                    enabled: !VideoExporter.busy && !root.mediaChanged
+                    Label { text: qsTr("Resolution") }
+                    ComboBox { id: resolution; Layout.fillWidth: true; model: [qsTr("Original"), "1080p", "720p", "480p"] }
+                    Label { text: qsTr("Quality") }
+                    ComboBox { id: quality; Layout.fillWidth: true; model: [qsTr("Compact"), qsTr("Balanced"), qsTr("High")]; currentIndex: 1 }
+                    Label { text: qsTr("Primary subtitles") }
+                    ComboBox { id: primary; Layout.fillWidth: true; model: root.tracks; textRole: "text"; valueRole: "trackId" }
+                    Label { text: qsTr("Secondary subtitles") }
+                    ComboBox { id: secondary; Layout.fillWidth: true; model: root.tracks; textRole: "text"; valueRole: "trackId" }
+                    Label { text: qsTr("Audio") }
+                    CheckBox { id: audio; text: qsTr("Include selected audio track"); enabled: root.player.state.aid > 0 }
+                }
+                Label { Layout.fillWidth: true; text: qsTr("Selected subtitles are permanently visible in the exported video. Choose None for both to export without subtitles. Playback subtitle delays are applied."); wrapMode: Text.Wrap; opacity: 0.75 }
+                Frame {
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        anchors.fill: parent
+                        Label { text: root.estimate.valid ? qsTr("Estimated size: %1 MB").arg(root.estimate.sizeMB.toFixed(1)) : qsTr("Estimated size: —"); font.bold: true; font.pixelSize: 18 }
+                        Label { text: root.estimate.valid ? qsTr("MP4 · H.264 · %1 × %2 · size may vary").arg(root.estimate.width).arg(root.estimate.height) : qsTr("MP4 · H.264"); opacity: 0.75 }
+                        Label { text: qsTr("Save to: %1").arg(root.folder); wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                    }
+                }
+                Label { visible: primary.currentValue > 0 && primary.currentValue === secondary.currentValue; text: qsTr("Choose different subtitle tracks."); color: "#e9a36b" }
+                ProgressBar { visible: VideoExporter.busy; value: VideoExporter.progress; Layout.fillWidth: true }
+                Label { visible: VideoExporter.status.length > 0; text: VideoExporter.status; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button { text: qsTr("Open folder"); enabled: !VideoExporter.busy && VideoExporter.outputPath.length > 0; onClicked: VideoExporter.openFolder() }
+                    Item { Layout.fillWidth: true }
+                    Button { text: VideoExporter.busy ? qsTr("Keep watching") : qsTr("Close"); onClicked: root.close() }
+                    Button { visible: VideoExporter.busy; text: VideoExporter.preparingPreview ? qsTr("Cancel preview") : qsTr("Cancel export"); onClicked: VideoExporter.cancel() }
+                    Button {
+                        text: qsTr("Export section")
+                        objectName: "exportSection"
+                        visible: !VideoExporter.busy
+                        highlighted: true
+                        enabled: root.validSelection
+                        onClicked: {
+                            previewPane.pause();
+                            VideoExporter.start(root.mediaPath, root.startSeconds, root.endSeconds,
+                                root.maxHeight, quality.currentIndex, primary.currentValue ?? -1,
+                                secondary.currentValue ?? -1, audio.checked);
+                        }
+                    }
                 }
             }
-            Label { visible: primary.currentValue > 0 && primary.currentValue === secondary.currentValue; text: qsTr("Choose different subtitle tracks."); color: "#e9a36b" }
-            ProgressBar { visible: VideoExporter.busy; value: VideoExporter.progress; Layout.fillWidth: true }
-            Label { visible: VideoExporter.status.length > 0; text: VideoExporter.status; wrapMode: Text.WrapAnywhere; Layout.fillWidth: true }
-            RowLayout {
+            ExportVideoPreview {
+                id: previewPane
                 Layout.fillWidth: true
-                Button { text: qsTr("Open folder"); enabled: !VideoExporter.busy && VideoExporter.outputPath.length > 0; onClicked: VideoExporter.openFolder() }
-                Item { Layout.fillWidth: true }
-                Button { text: VideoExporter.busy ? qsTr("Keep watching") : qsTr("Close"); onClicked: root.close() }
-                Button { visible: VideoExporter.busy; text: qsTr("Cancel export"); onClicked: VideoExporter.cancel() }
-                Button {
-                    text: qsTr("Export section")
-                    objectName: "exportSection"
-                    visible: !VideoExporter.busy
-                    highlighted: true
-                    enabled: !!root.estimate.valid && !root.mediaChanged && !(primary.currentValue > 0 && primary.currentValue === secondary.currentValue)
-                    onClicked: VideoExporter.start(root.mediaPath, root.startSeconds, root.endSeconds,
-                        root.maxHeight, quality.currentIndex, primary.currentValue ?? -1,
-                        secondary.currentValue ?? -1, audio.checked)
-                }
+                Layout.preferredWidth: 460
+                Layout.alignment: Qt.AlignTop
+                active: root.visible
+                canPreview: root.validSelection
+                sourcePath: VideoExporter.previewPath
+                onRequested: VideoExporter.preview(root.mediaPath, root.startSeconds, root.endSeconds,
+                    root.maxHeight, quality.currentIndex, primary.currentValue ?? -1,
+                    secondary.currentValue ?? -1, audio.checked)
             }
         }
     }

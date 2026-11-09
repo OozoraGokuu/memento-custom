@@ -65,6 +65,7 @@
 #include "os/screensaver.h"
 #include "player/mpvplayer.h"
 #include "player/mpvthumbnail.h"
+#include "player/mpvpreview.h"
 #include "quick/clipboard.h"
 #include "quick/coloredsvgprovider.h"
 #include "quick/episodefolder.h"
@@ -261,6 +262,7 @@ static void registerQmlTypes(Context &context)
     /* Player Types */
 
     qmlRegisterType<MpvPlayer>(MEMENTO_URI, 1, 0, "MpvPlayer");
+    qmlRegisterType<MpvPreview>(MEMENTO_URI, 1, 0, "MpvPreview");
     qmlRegisterType<MpvThumbnail>(MEMENTO_URI, 1, 0, "MpvThumbnail");
     qmlRegisterUncreatableType<MpvState>(
         MEMENTO_URI, 1, 0, "MpvState",

@@ -1,4 +1,6 @@
 #include <QTest>
+#include <QUuid>
+#include "state/context.h"
 #include <QTemporaryDir>
 #include <QProcess>
 #include <QStandardPaths>
@@ -32,6 +34,11 @@ private slots:
     void initTestCase()
     {
         std::setlocale(LC_NUMERIC, "C");
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName("video-export-test-" + QUuid::createUuid().toString(QUuid::WithoutBraces));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getDataDir()));
+        QVERIFY(QDir().mkpath(DirectoryUtils::getConfigDir()));
+        Dictionary::createDatabaseInstance();
         m_ffmpeg = QStandardPaths::findExecutable("ffmpeg");
         m_ffprobe = QStandardPaths::findExecutable("ffprobe");
         QVERIFY(m_dir.isValid());
@@ -86,6 +93,7 @@ private slots:
         QTest::newRow("delayed-primary") << 1 << -1 << true << 2.0 << 320;
         QTest::newRow("delayed-secondary") << -1 << 2 << true << 2.0 << 320;
         QTest::newRow("scaled-both") << 1 << 2 << true << 0.0 << 160;
+        QTest::newRow("first-frame-ongoing") << 1 << 2 << true << 0.0 << 320;
         QTest::newRow("external-audio") << -1 << -1 << true << 0.0 << 320;
     }
     void realClips()
@@ -103,7 +111,8 @@ private slots:
             context.primarySubtitle.externalFilename = m_dir.filePath("primary.srt");
         }
         MpvVideoClipArgs args;
-        args.start = 3; args.end = 5; args.audio = audio;
+        const bool firstFrame = QByteArray(QTest::currentDataTag()) == "first-frame-ongoing";
+        args.start = firstFrame ? 4 : 3; args.end = args.start + 2; args.audio = audio;
         args.subtitles = primary > 0 || secondary > 0;
         MpvVideoExportOptions options;
         options.width = width; options.height = width * 9 / 16; options.videoKbps = 300;
@@ -115,7 +124,7 @@ private slots:
             run(m_ffmpeg, {"-v", "error", "-i", m_input, "-map", "0:a", "-c", "copy", "-y", options.externalAudio.externalFilename});
             context.aid = 2;
         }
-        options.start = 3; options.end = 5;
+        options.start = args.start; options.end = args.end;
         options.control = std::make_shared<MpvEncodingControl>();
         options.outputPath = m_dir.filePath(QString(QTest::currentDataTag()) + ".mp4");
         const auto path = MpvController::encodeVideoClip(context, args, {}, false, false, &options);
@@ -136,7 +145,7 @@ private slots:
         const double duration = probe["format"].toObject()["duration"].toString().toDouble();
         QVERIFY2(duration >= 1.9 && duration <= 2.2, qPrintable(QString::number(duration)));
         const QString frame = path + ".png";
-        run(m_ffmpeg, {"-v", "error", "-ss", "0.8", "-i", path, "-frames:v", "1", "-y", frame});
+        run(m_ffmpeg, {"-v", "error", "-ss", firstFrame ? "0" : "0.8", "-i", path, "-frames:v", "1", "-y", frame});
         const QImage image(frame);
         QVERIFY(!image.isNull());
         // Antialiased text may be gray at small resolutions; the fixture is black.
@@ -147,6 +156,49 @@ private slots:
         QCOMPARE(top > 0, secondary > 0 && delay == 0.0);
         QCOMPARE(bottom > 0, primary > 0 && delay == 0.0);
     }
+    void temporaryPreviewLifecycle()
+    {
+        if (m_input.isEmpty()) QSKIP("FFmpeg tools unavailable");
+        Context context;
+        MpvPlayer player;
+        context.setPlayer(&player);
+        auto *state = player.state();
+        state->setPath(m_input);
+        state->setDuration(6); state->setVideoWidth(320); state->setVideoHeight(180);
+        state->setVid(1); state->setAid(1); state->setPause(true); state->setTimePosition(4);
+        auto *primary = new MpvTrack(&player), *secondary = new MpvTrack(&player);
+        primary->setId(1); secondary->setId(2);
+        state->setSubtitleTracks({primary, secondary});
+        auto *exporter = context.videoExporter();
+        QVERIFY(exporter->preview(m_input, 3, 5, 0, 1, 1, 2, true));
+        QVERIFY(exporter->preparingPreview());
+        QVERIFY(!exporter->preview(m_input, 3, 5, 0, 1, 1, 2, true));
+        QTRY_VERIFY_WITH_TIMEOUT(!exporter->busy(), 10000);
+        const QString preview = exporter->previewPath();
+        QVERIFY2(QFileInfo(preview).size() > 0, qPrintable(exporter->status()));
+        QVERIFY(preview.startsWith(QDir::tempPath() + "/memento-preview-"));
+        QVERIFY(exporter->outputPath().isEmpty());
+        QCOMPARE(state->path(), m_input);
+        QCOMPARE(state->timePosition(), 4.0);
+        QVERIFY(state->pause());
+        const auto probe = QJsonDocument::fromJson(run(m_ffprobe,
+            {"-v", "error", "-show_format", "-of", "json", preview})).object();
+        const double duration = probe["format"].toObject()["duration"].toString().toDouble();
+        QVERIFY(duration >= 1.9 && duration <= 2.2);
+        exporter->clearPreview();
+        QVERIFY(exporter->previewPath().isEmpty());
+        QTRY_VERIFY(!QFile::exists(preview));
+
+        // Closing/changing the selection while encoding must not publish a late preview.
+        QVERIFY(exporter->preview(m_input, 0, 6, 0, 1, -1, -1, true));
+        exporter->clearPreview();
+        QTRY_VERIFY_WITH_TIMEOUT(!exporter->busy(), 10000);
+        QVERIFY(exporter->previewPath().isEmpty());
+        QVERIFY(QDir(QFileInfo(preview).absolutePath()).entryList(QDir::Files).isEmpty());
+        QVERIFY(!exporter->preview(m_input + ".different", 0, 6, 0, 1, -1, -1, true));
+        context.setPlayer(nullptr);
+    }
+    void cleanupTestCase() { Dictionary::destroyDatabaseInstance(); }
     void cancelRemovesPartial()
     {
         if (m_input.isEmpty()) QSKIP("FFmpeg tools unavailable");
@@ -163,5 +215,5 @@ private slots:
         QVERIFY(!QFile::exists(options.outputPath));
     }
 };
-QTEST_GUILESS_MAIN(VideoExportTest)
+QTEST_MAIN(VideoExportTest)
 #include "test_videoexport.moc"
