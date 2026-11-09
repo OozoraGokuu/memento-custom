@@ -37,6 +37,7 @@
 #include "quick/keytracker.h"
 #include "setting/settings.h"
 #include "state/immersionstats.h"
+#include "state/lookuphistory.h"
 #include "state/videoexporter.h"
 #include "subtitle/subtitlelists.h"
 #include "util/utils.h"
@@ -116,6 +117,7 @@ public:
     [[nodiscard]]
     EpisodeFolder *episodeLibrary() const noexcept;
     ImmersionStats *immersionStats() const noexcept { return m_immersionStats; }
+    LookupHistory *lookupHistory() const noexcept { return m_lookupHistory; }
     AniListClient *aniListClient() const noexcept { return m_aniListClient; }
 
     /**
@@ -193,6 +195,7 @@ private:
     EpisodeFolder *m_episodeLibrary{new EpisodeFolder(this)};
 
     ImmersionStats *m_immersionStats{new ImmersionStats(m_episodeLibrary, this)};
+    LookupHistory *m_lookupHistory{new LookupHistory(m_episodeLibrary, this)};
 
     AniListClient *m_aniListClient{new AniListClient(m_episodeLibrary, this)};
 

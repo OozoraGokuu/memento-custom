@@ -323,6 +323,9 @@ static void registerQmlTypes(Context &context)
     qmlRegisterSingletonInstance<ImmersionStats>(
         MEMENTO_URI, 1, 0, "ImmersionStats", context.immersionStats()
     );
+    qmlRegisterSingletonInstance<LookupHistory>(
+        MEMENTO_URI, 1, 0, "LookupHistory", context.lookupHistory()
+    );
     qmlRegisterSingletonInstance<Features>(
         MEMENTO_URI, 1, 0, "Features", new Features(&context)
     );

@@ -23,6 +23,8 @@
 #include <QObject>
 
 #include <QQmlListProperty>
+#include <QTimer>
+#include <QVariantMap>
 
 #ifdef MEMENTO_SYSTEM_QCORO
 #include <QCoroTask>
@@ -40,6 +42,9 @@ class DictionarySearch : public QObject
 {
     Q_OBJECT
 
+    Q_PROPERTY(QVariantMap historyContext READ historyContext WRITE setHistoryContext
+               NOTIFY historyContextChanged)
+
     Q_PROPERTY(
         QQmlListProperty<Term> terms
         READ termsQml
@@ -55,6 +60,9 @@ class DictionarySearch : public QObject
 public:
     DictionarySearch(QObject *parent = nullptr);
     virtual ~DictionarySearch();
+
+    QVariantMap historyContext() const { return m_historyContext; }
+    void setHistoryContext(const QVariantMap &context);
 
     /**
      * @brief Searches for all terms. Popuplates the terms property.
@@ -109,6 +117,10 @@ public:
     Kanji *kanji() const noexcept;
 
 signals:
+    void historyContextChanged();
+    /** One settled successful lookup; paired term/kanji searches count once. */
+    void lookupCompleted(const QString &word, const QString &reading,
+                         const QString &text, const QVariantMap &context);
     /**
      * @brief Emitted when terms are changed.
      */
@@ -130,7 +142,7 @@ private:
      * @return An awaitable task.
      */
     QCoro::Task<void> searchTermsAsync(
-        const QString &query, const QString &text, qsizetype index);
+        const QString &query, const QString &text, qsizetype index, quint64 historyId);
 
     /**
      * @brief Search for all kanji in a query. Populates the kanji property.
@@ -141,7 +153,7 @@ private:
      * @return An awaitable task.
      */
     QCoro::Task<void> searchKanjiAsync(
-        const QString &character, const QString &text, qsizetype index);
+        const QString &character, const QString &text, qsizetype index, quint64 historyId);
 
     /**
      * @brief Clears term results and schedules existing objects for deletion.
@@ -153,6 +165,25 @@ private:
      * deletion.
      */
     void clearKanjiLater();
+
+    quint64 beginHistoryLookup(bool terms, const QString &text, qsizetype index);
+    void cancelHistoryLookup();
+    void finishHistoryLookup();
+
+    QVariantMap m_historyContext;
+    QVariantMap m_lookupContext;
+    QTimer m_historyTimer;
+    QString m_lookupText;
+    QString m_lookupWord;
+    QString m_lookupReading;
+    QString m_lookupKanji;
+    qsizetype m_lookupIndex{-1};
+    quint64 m_historyId{0};
+    bool m_historyPendingTerms{false};
+    bool m_historyPendingKanji{false};
+    bool m_historyCanPairKanji{false};
+    bool m_historySettled{false};
+    bool m_historyEmitted{false};
 
     /* IDs used to ignore stale async search completions. */
     quint64 m_termsSearchId{0};

@@ -63,6 +63,8 @@ qt_add_qml_module(
         qml/controls/KeybindCommand.qml
         qml/controls/LibraryPage.qml
         qml/controls/StatisticsPage.qml
+        qml/controls/ImmersionCalendar.qml
+        qml/controls/LookupHistoryPanel.qml
         qml/controls/ManualSearchPage.qml
         qml/controls/Player.qml
         qml/controls/PlayerControls.qml

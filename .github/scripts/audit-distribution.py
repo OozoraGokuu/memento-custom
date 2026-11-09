@@ -7,7 +7,8 @@ import sys
 
 forbidden = {'anilist.json', 'anki_connect.json', 'episode-library.json',
              'episode-library.backup.json', 'dictionaries.sqlite', 'memento.conf',
-             'mpv.conf', 'input.conf', '.env', 'cookies.txt', 'cookies.sqlite'}
+             'mpv.conf', 'input.conf', '.env', 'cookies.txt', 'cookies.sqlite',
+             'immersion-stats.json', 'lookup-history.json'}
 secrets = re.compile(rb'gh[pousr]_[A-Za-z0-9]{25,}|github_pat_[A-Za-z0-9_]{30,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=]{32}')
 # Public cryptographic self-test vectors compiled into the GnuTLS library.
 # Each complete PEM was compared byte-for-byte with upstream 3.8.13:

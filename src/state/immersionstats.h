@@ -23,6 +23,11 @@ public:
     int revision() const noexcept { return m_revision; }
     void attachPlayer(MpvPlayer *player);
     Q_INVOKABLE QVariantMap summary(int days) const;
+    /** A Monday-first, padded Jan–Dec grid; each seven entries form one week.
+     * Includes available years, month columns, day details and annual totals.
+     * Invalid/future years select the current year. Future days are disabled.
+     */
+    Q_INVOKABLE QVariantMap calendar(int year) const;
 
 signals:
     void changed();

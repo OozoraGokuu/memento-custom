@@ -359,7 +359,28 @@ ApplicationWindow {
                         torrentSearchDialog.openForCurrentMedia();
                     }
                 }
-                StatisticsPage { id: statisticsPage }
+                StatisticsPage {
+                    id: statisticsPage
+                    onLookupRequested: function(word) {
+                        MementoSettings.windowSearch = true;
+                        searchPage.setQuery(word);
+                        root.raise();
+                        root.requestActivate();
+                        if (MementoSettings.interfaceSearchWindow && searchWindowLoader.item) {
+                            searchWindowLoader.item.raise();
+                            searchWindowLoader.item.requestActivate();
+                        }
+                    }
+                    onSceneRequested: function(path, position) {
+                        if (player.state.path === path) {
+                            player.controller.seek(position);
+                        } else {
+                            player.controller.loadFile(path, false, ["start=" + position.toFixed(3)]);
+                        }
+                        root.raise();
+                        root.requestActivate();
+                    }
+                }
             }
         }
     }

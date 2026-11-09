@@ -121,6 +121,7 @@ Page {
         SubtitleList {
             id: primarySubtitleList
             subtitleListModel: SubtitleLists.primary
+            mediaPath: root.player?.state.path ?? ""
             delay: root.player?.state.subtitle.delay ?? 0
             textColor: root.textColor
             hoverColor: root.hoverColor
@@ -137,6 +138,7 @@ Page {
         SubtitleList {
             id: secondarySubtitleList
             subtitleListModel: SubtitleLists.secondary
+            mediaPath: root.player?.state.path ?? ""
             delay: root.player?.state.secondarySubtitle.delay ?? 0
             textColor: root.textColor
             hoverColor: root.hoverColor

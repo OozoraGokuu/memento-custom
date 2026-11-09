@@ -26,7 +26,12 @@
 
 DictionarySearch::DictionarySearch(QObject *parent) : QObject(parent)
 {
-
+    m_historyTimer.setSingleShot(true);
+    m_historyTimer.setInterval(500);
+    connect(&m_historyTimer, &QTimer::timeout, this, [this] {
+        m_historySettled = true;
+        finishHistoryLookup();
+    });
 }
 
 DictionarySearch::~DictionarySearch()
@@ -40,11 +45,12 @@ DictionarySearch::~DictionarySearch()
 void DictionarySearch::searchTerms(
     const QString &query, const QString &text, qsizetype index)
 {
-    searchTermsAsync(query, text, index);
+    const quint64 historyId = beginHistoryLookup(true, text, index);
+    searchTermsAsync(query, text, index, historyId);
 }
 
 QCoro::Task<void> DictionarySearch::searchTermsAsync(
-    const QString &query, const QString &text, qsizetype index)
+    const QString &query, const QString &text, qsizetype index, quint64 historyId)
 {
     QPointer<DictionarySearch> dictionarySearch{this};
     const quint64 termsSearchId = ++m_termsSearchId;
@@ -66,23 +72,34 @@ QCoro::Task<void> DictionarySearch::searchTermsAsync(
     }
 
     std::swap(m_terms, terms);
-    emit termsChanged();
-
+    if (historyId == m_historyId)
+    {
+        m_historyPendingTerms = false;
+        if (!m_terms.isEmpty())
+        {
+            m_lookupWord = m_terms.first()->expression();
+            m_lookupReading = m_terms.first()->reading();
+        }
+    }
     for (Term *term : terms)
     {
         term->deleteLater();
     }
     terms.clear();
+    emit termsChanged();
+    // A result observer can close/destroy the popup or start another lookup.
+    if (dictionarySearch && historyId == m_historyId) finishHistoryLookup();
 }
 
 void DictionarySearch::searchKanji(
     const QString &character, const QString &text, qsizetype index)
 {
-    searchKanjiAsync(character, text, index);
+    const quint64 historyId = beginHistoryLookup(false, text, index);
+    searchKanjiAsync(character, text, index, historyId);
 }
 
 QCoro::Task<void> DictionarySearch::searchKanjiAsync(
-    const QString &character, const QString &text, qsizetype index)
+    const QString &character, const QString &text, qsizetype index, quint64 historyId)
 {
     QPointer<DictionarySearch> dictionarySearch{this};
     const quint64 kanjiSearchId = ++m_kanjiSearchId;
@@ -104,13 +121,18 @@ QCoro::Task<void> DictionarySearch::searchKanjiAsync(
     }
 
     std::swap(m_kanji, kanji);
-    emit kanjiChanged();
-
+    if (historyId == m_historyId)
+    {
+        m_historyPendingKanji = false;
+        if (m_kanji) m_lookupKanji = m_kanji->character();
+    }
     if (kanji != nullptr)
     {
         kanji->deleteLater();
         kanji = nullptr;
     }
+    emit kanjiChanged();
+    if (dictionarySearch && historyId == m_historyId) finishHistoryLookup();
 }
 
 /* End Search Methods */
@@ -125,6 +147,7 @@ void DictionarySearch::clearResults()
 
 void DictionarySearch::clearTerms()
 {
+    cancelHistoryLookup();
     ++m_termsSearchId;
     clearTermsLater();
 }
@@ -146,6 +169,7 @@ void DictionarySearch::clearTermsLater()
 
 void DictionarySearch::clearKanji()
 {
+    cancelHistoryLookup();
     ++m_kanjiSearchId;
     clearKanjiLater();
 }
@@ -171,6 +195,71 @@ QQmlListProperty<Term> DictionarySearch::termsQml()
 Kanji *DictionarySearch::kanji() const noexcept
 {
     return m_kanji;
+}
+
+void DictionarySearch::setHistoryContext(const QVariantMap &context)
+{
+    if (m_historyContext == context) return;
+    m_historyContext = context;
+    emit historyContextChanged();
+}
+
+quint64 DictionarySearch::beginHistoryLookup(bool terms, const QString &text,
+                                            qsizetype index)
+{
+    // QML requests terms and kanji consecutively for one hovered position.
+    // Only that immediate pair shares history; later searches invalidate it.
+    if (!terms && m_historyCanPairKanji && m_lookupText == text &&
+        m_lookupIndex == index && m_lookupContext == m_historyContext)
+    {
+        m_historyCanPairKanji = false;
+        m_historyPendingKanji = true;
+        return m_historyId;
+    }
+    cancelHistoryLookup();
+    m_lookupText = text;
+    m_lookupIndex = index;
+    m_lookupContext = m_historyContext;
+    m_historyPendingTerms = terms;
+    m_historyPendingKanji = !terms;
+    m_historyCanPairKanji = terms;
+    m_historyTimer.start();
+    const quint64 historyId = m_historyId;
+    if (terms)
+    {
+        QTimer::singleShot(0, this, [this, historyId] {
+            if (historyId == m_historyId) m_historyCanPairKanji = false;
+        });
+    }
+    return historyId;
+}
+
+void DictionarySearch::cancelHistoryLookup()
+{
+    ++m_historyId;
+    m_historyTimer.stop();
+    m_historyPendingTerms = false;
+    m_historyPendingKanji = false;
+    m_historyCanPairKanji = false;
+    m_historySettled = false;
+    m_historyEmitted = false;
+    m_lookupWord.clear();
+    m_lookupReading.clear();
+    m_lookupKanji.clear();
+}
+
+void DictionarySearch::finishHistoryLookup()
+{
+    if (!m_historySettled || m_historyEmitted ||
+        m_historyPendingTerms || m_historyPendingKanji) return;
+    const QString word = m_lookupWord.isEmpty() ? m_lookupKanji : m_lookupWord;
+    if (word.isEmpty()) return;
+    // Keep arguments stable if a direct signal listener clears/reuses us.
+    const QString reading = m_lookupReading;
+    const QString text = m_lookupText;
+    const QVariantMap context = m_lookupContext;
+    m_historyEmitted = true;
+    emit lookupCompleted(word, reading, text, context);
 }
 
 /* End Properties */

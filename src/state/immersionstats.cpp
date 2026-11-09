@@ -218,6 +218,75 @@ QVariantMap ImmersionStats::summary(int days) const
         {"daily", daily}, {"titles", titles}, {"sessions", sessions}};
 }
 
+QVariantMap ImmersionStats::calendar(int year) const
+{
+    const QDate today = QDate::currentDate();
+    if (year < 1 || year > today.year()) year = today.year();
+    int firstYear = today.year();
+    for (auto it = m_dailySeconds.cbegin(); it != m_dailySeconds.cend(); ++it)
+    {
+        const QDate day = QDate::fromString(it.key(), Qt::ISODate);
+        if (day.isValid() && day.year() > 0 && day <= today && std::isfinite(it.value()) && it.value() > 0)
+            firstYear = std::min(firstYear, day.year());
+    }
+    QVariantList years;
+    for (int available = today.year(); available >= std::min(firstYear, year); --available)
+        years.append(available);
+
+    const QDate first(year, 1, 1), last(year, 12, 31);
+    const QDate gridFirst = first.addDays(1 - first.dayOfWeek());
+    const QDate gridLast = last.addDays(7 - last.dayOfWeek());
+    const int cellCount = int(gridFirst.daysTo(gridLast)) + 1;
+    QVariantList days;
+    QVariantList months;
+    double total = 0;
+    int activeDays = 0;
+    int completions = 0;
+    QString defaultDate = (year == today.year() ? today : first).toString(Qt::ISODate);
+
+    for (int index = 0; index < cellCount; ++index)
+    {
+        const QDate date = gridFirst.addDays(index);
+        const QString iso = date.toString(Qt::ISODate);
+        const bool inYear = date.year() == year;
+        const bool future = date > today;
+        const bool enabled = inYear && !future;
+        const double stored = m_dailySeconds.value(iso);
+        const double seconds = enabled && std::isfinite(stored) ? std::max(0.0, stored) : 0;
+        // Fixed thresholds make shades comparable across years: <15m, <30m,
+        // <60m, and 60m+. Any positive playback gets at least the first shade.
+        const int level = seconds <= 0 ? 0 : seconds < 900 ? 1 : seconds < 1800 ? 2 : seconds < 3600 ? 3 : 4;
+        const int completed = enabled ? std::max(0, m_dailyCompletions.value(iso)) : 0;
+        const auto byTitle = enabled ? m_dailyTitles.value(iso) : QHash<QString, double>{};
+        QList<QString> keys;
+        for (auto it = byTitle.cbegin(); it != byTitle.cend(); ++it)
+            if (std::isfinite(it.value()) && it.value() > 0) keys.append(it.key());
+        std::sort(keys.begin(), keys.end(), [&byTitle, this](const QString &a, const QString &b) {
+            if (byTitle.value(a) != byTitle.value(b)) return byTitle.value(a) > byTitle.value(b);
+            return m_titles.value(a, a) < m_titles.value(b, b);
+        });
+        QVariantList titles;
+        for (const QString &key : keys)
+            titles.append(QVariantMap{{"title", m_titles.value(key, key)}, {"seconds", byTitle.value(key)}});
+        days.append(QVariantMap{{"date", iso}, {"label", QLocale().toString(date, QLocale::LongFormat)},
+            {"seconds", seconds}, {"level", level}, {"inYear", inYear}, {"future", future},
+            {"enabled", enabled}, {"titles", titles}, {"completedCount", completed}});
+
+        if (inYear && date.day() == 1)
+            months.append(QVariantMap{{"label", QLocale().monthName(date.month(), QLocale::ShortFormat)},
+                {"week", index / 7}});
+        if (!enabled) continue;
+        total += seconds;
+        if (seconds >= 60) ++activeDays;
+        completions += completed;
+        if (seconds > 0 && year != today.year()) defaultDate = iso;
+    }
+    return {{"year", year}, {"currentYear", today.year()}, {"years", years},
+        {"today", today.toString(Qt::ISODate)}, {"days", days}, {"weeks", cellCount / 7},
+        {"months", months}, {"activeSeconds", total}, {"activeDays", activeDays},
+        {"completedCount", completions}, {"defaultDate", defaultDate}};
+}
+
 void ImmersionStats::load()
 {
     QFile file(statsPath());

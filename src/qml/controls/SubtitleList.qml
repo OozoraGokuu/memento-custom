@@ -10,6 +10,7 @@ ListView {
     readonly property ItemSelectionModel selectionModel: root.subtitleListModel?.selectionModel ?? null
 
     property real delay: 0
+    property string mediaPath: ""
     property color textColor: "white"
     property color hoverColor: "#1A1A1A"
     property color selectedColor: "#333333"
@@ -154,6 +155,7 @@ ListView {
 
             SearchableText {
                 id: delegateText
+                historyContext: LookupHistory.contextFor(root.mediaPath, model.start + root.delay)
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.textColor

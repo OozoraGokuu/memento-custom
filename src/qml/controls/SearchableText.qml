@@ -16,6 +16,7 @@ TextEdit {
 
     /* The unformatted text string */
     readonly property string plainText: root.getText(0, root.length)
+    property var historyContext: ({})
 
     /**
      * Returns the index into plain text of the coordinates.
@@ -55,6 +56,7 @@ TextEdit {
 
         const MAX_SEARCH_LENGTH = 40;
 
+        popupLoader.item.search.historyContext = root.historyContext;
         popupLoader.item.search.searchTerms(
                     root.plainText.substring(index, index + MAX_SEARCH_LENGTH),
                     root.plainText,

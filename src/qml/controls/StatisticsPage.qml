@@ -8,6 +8,8 @@ import Ripose.Memento
 Page {
     id: root
     property int rangeDays: 7
+    signal lookupRequested(string word)
+    signal sceneRequested(string path, real position)
     readonly property int revision: ImmersionStats.revision
     readonly property var stats: {
         const updated = root.revision;
@@ -52,12 +54,16 @@ Page {
                     spacing: 2
                     Label {
                         text: qsTr("Immersion statistics")
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
                         font.pixelSize: 25
                         font.bold: true
                         color: MementoPalette.windowText
                     }
                     Label {
-                        text: qsTr("Your actual playback activity, recorded on this device")
+                        text: qsTr("Watch activity and dictionary lookups, stored on this device")
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
                         color: MementoPalette.placeholderText
                     }
                 }
@@ -109,6 +115,12 @@ Page {
                         }
                     }
                 }
+            }
+
+            ImmersionCalendar {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
             }
 
             Rectangle {
@@ -247,12 +259,21 @@ Page {
                 }
             }
 
+            LookupHistoryPanel {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                rangeDays: root.rangeDays
+                onLookupRequested: word => root.lookupRequested(word)
+                onSceneRequested: (path, position) => root.sceneRequested(path, position)
+            }
+
             Label {
                 Layout.fillWidth: true
                 Layout.leftMargin: 24
                 Layout.rightMargin: 24
                 Layout.bottomMargin: 20
-                text: qsTr("Tracking starts with this update. Pauses, loading, buffering and seeks are excluded from active time.")
+                text: qsTr("Pauses, loading, buffering and seeks are excluded from active time. The calendar shows a full year; the date filters apply to the other statistics and lookup history.")
                 color: MementoPalette.placeholderText
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap

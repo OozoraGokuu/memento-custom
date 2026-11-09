@@ -707,6 +707,9 @@ MpvPlayer {
 
         DictionarySearch {
             id: dictionarySearch
+            onLookupCompleted: function(word, reading, text, context) {
+                LookupHistory.record(word, reading, text, context);
+            }
         }
 
         Timer {
@@ -763,6 +766,8 @@ MpvPlayer {
 
             const text = subtitleText.text;
             const query = text.substring(index);
+            dictionarySearch.historyContext = LookupHistory.contextFor(
+                        root.state.path, root.state.timePosition);
             dictionarySearch.searchTerms(query, text, index);
             dictionarySearch.searchKanji(text.charAt(index), text, index);
         }

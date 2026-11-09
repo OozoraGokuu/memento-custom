@@ -121,7 +121,7 @@ Page {
         search.searchTerms(query, query, 0);
         if (query.length > 0)
         {
-            search.searchKanji(query[0], query[0], 0);
+            search.searchKanji(query[0], query, 0);
         }
         root.pushSearch(search);
     }
@@ -212,6 +212,10 @@ Page {
 
     Component {
         id: dictionarySearchComponent
-        DictionarySearch { }
+        DictionarySearch {
+            onLookupCompleted: function(word, reading, text, context) {
+                LookupHistory.record(word, reading, text, context);
+            }
+        }
     }
 }

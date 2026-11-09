@@ -54,5 +54,8 @@ Popup {
 
     DictionarySearch {
         id: dictionarySearch
+        onLookupCompleted: function(word, reading, text, context) {
+            LookupHistory.record(word, reading, text, context);
+        }
     }
 }

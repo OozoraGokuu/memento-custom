@@ -4,6 +4,8 @@ add_library(
     context.h
     immersionstats.cpp
     immersionstats.h
+    lookuphistory.cpp
+    lookuphistory.h
     videoexporter.cpp
     videoexporter.h
 )
