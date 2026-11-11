@@ -10,7 +10,7 @@ The Windows CI job compiles native x86_64 binaries with warnings treated as erro
 | AnkiConnect | Real local HTTP connection, API key, deck/field lookup, Japanese note submission and server errors against a fake Anki service |
 | Anki sentence video | Real optional video note payload, five-second timing and file-boundary guards; portable-package H.264/AAC MP4 creation, fast-start metadata, target-field validation, Unicode paths, and five seconds of decoded, non-silent audio |
 | Jimaku | Matching and archive handling with synthetic fixtures |
-| Saved subtitle release | Independent episode/format matching, group and variant boundaries, legacy saved rules, current-series targeting, repeated fetches, numbering offsets, mixed ASS/SRT files, ambiguous candidates, and refreshed Kitsunekko catalogs |
+| Saved subtitle release | Independent episode/format matching, paired season/absolute episode numbers, source-service and variant boundaries, legacy saved rules, current-series targeting, repeated fetches, numbering offsets, mixed ASS/SRT files, ambiguous candidates, and refreshed Kitsunekko catalogs |
 | AJATT mirror | Catalog/cache/download logic tests |
 | Torrent RSS search | User-configured URLs, same-origin RSS discovery and torrent links, request parameter preservation, RSS parsing, sorting and DNS fallback transport tests |
 | Torrent streaming | Engine selection, HTTP byte-range streaming of synthetic data, invalid ranges, normal cleanup and link/junction safety tests |
@@ -24,6 +24,14 @@ The Windows CI job compiles native x86_64 binaries with warnings treated as erro
 Automated tests cannot establish that every UI interaction, GPU/audio driver, or external account works. Live AniList writes, authenticated Jimaku downloads, Anki card creation and Migaku Memory import require a user's own accounts and must be checked separately. CI does not use or publish the maintainer's credentials. Public torrent peers and provider availability are not deterministic test services.
 
 Before relying on a new machine, play a local file, verify picture and sound, load primary/secondary subtitles, try lookup and auto-pause, export one image/audio pair, and confirm its audio plays. Configure and test accounts individually; check episode mapping before enabling automatic AniList updates.
+
+## Real-file subtitle regression check
+
+The paired-number matching fix was also checked on Linux with existing Oshi no Ko season 3 video files, episodes 4 through 8, and their Amazon Japanese SDH SRT releases. The old installed build and the previous preview both reproduced the failure: episode 4 restored its saved subtitle, but episode 5 did not select an external subtitle. Those filenames contain both a season-relative number (`S03E05`) and an absolute number (`第29話`).
+
+With the fix, an isolated profile initially containing only the episode 4 subtitle choice selected the corresponding release for every episode through episode 8. Both file-load transitions and clicks on the Next episode button were checked. Each selected external filename, visible subtitle text, and advancing playback position was verified; episode 8 also exercised downloading from the live provider. Automated regression cases additionally reject a different source, format, season, language, SDH variant, or absolute numbering offset, and cover existing saved v1/v2 rules.
+
+The videos, subtitle contents, screenshots, account settings, and library profile are not included in the repository. These checks used a separate profile and silent audio output; they do not validate audio hardware or establish that an entire episode was watched without interruption.
 
 ## macOS
 

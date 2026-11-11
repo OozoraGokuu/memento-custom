@@ -180,8 +180,30 @@ QVector<EpisodeToken> independentEpisodeTokens(const QString &base)
     return tokens;
 }
 
+QString releaseSource(const QString &suffix)
+{
+    // A release medium marks the start of technical/source metadata after the
+    // free episode title. Preserve unbracketed services/groups in this block:
+    // e.g. .WEBRip.Amazon.ja-jp must not match .WEBRip.Netflix.ja-jp.
+    static const QRegularExpression medium(QStringLiteral(
+        "^(?:bd|bdrip|bluray|webrip|web[-_]dl|hdtv)$"));
+    static const QRegularExpression trailingMetadata(QStringLiteral(
+        "^(?:[a-z]{2,3}(?:[-_][a-z]{2,4})?|japanese|english|dialogue|dialog|signs|songs|full|forced|sdh|cc|hearing[-_]impaired|[0-9]{3,4}p|4k|x26[45]|h26[45]|hevc|avc|10bit|8bit|aac|flac|v[0-9]+)$"));
+    const auto parts = suffix.split(QLatin1Char('.'), Qt::SkipEmptyParts);
+    for (qsizetype index = 0; index < parts.size(); ++index)
+    {
+        if (!medium.match(parts.at(index)).hasMatch()) continue;
+        QStringList source = parts.mid(index + 1);
+        while (!source.isEmpty() && trailingMetadata.match(source.constLast()).hasMatch())
+            source.removeLast();
+        return source.join(QLatin1Char('.'));
+    }
+    return {};
+}
+
 QString releaseIdentity(const QString &normalized, qsizetype leaf,
-                        qsizetype extension, const EpisodeToken &token)
+                        qsizetype extension, const EpisodeToken &token,
+                        int version, int absoluteOffset)
 {
     const QString base = normalized.mid(leaf, extension - leaf);
     QString prefix = base.left(token.start);
@@ -269,7 +291,7 @@ QString releaseIdentity(const QString &normalized, qsizetype leaf,
     }
     QJsonArray jsonTags;
     for (const auto &value : tags) jsonTags.append(value);
-    const QJsonObject identity{
+    QJsonObject identity{
         {QStringLiteral("directory"), normalized.left(leaf)},
         {QStringLiteral("title"), prefix},
         {QStringLiteral("extension"), normalized.mid(extension + 1)},
@@ -279,12 +301,16 @@ QString releaseIdentity(const QString &normalized, qsizetype leaf,
         {QStringLiteral("metadata"), otherMetadata.join(QLatin1Char('.'))},
         {QStringLiteral("technical"), QJsonArray::fromStringList(technicalTags)}
     };
+    if (version >= 3)
+    {
+        identity.insert(QStringLiteral("source"), releaseSource(suffix));
+        if (absoluteOffset >= 0)
+            identity.insert(QStringLiteral("absoluteOffset"), absoluteOffset);
+    }
     return QString::fromUtf8(QJsonDocument(identity).toJson(QJsonDocument::Compact));
 }
 
-} // namespace
-
-QVariantMap SubtitleRelease::fromFile(const QString &name, int episode)
+QVariantMap ruleForVersion(const QString &name, int episode, int version)
 {
     const QString normalized = normalizedName(name);
     const qsizetype leaf = leafStart(normalized);
@@ -293,26 +319,62 @@ QVariantMap SubtitleRelease::fromFile(const QString &name, int episode)
         return {};
     QString mode = QStringLiteral("exact");
     QString pattern = normalized;
-    const auto tokens = independentEpisodeTokens(normalized.mid(leaf, extension - leaf));
+    const QString base = normalized.mid(leaf, extension - leaf);
+    auto tokens = independentEpisodeTokens(base);
+    int absoluteOffset = -1;
+    if (version >= 3 && tokens.size() == 2)
+    {
+        // Some releases give both a season-relative episode and its absolute
+        // Japanese episode number (S03E07.第31話). Only accept this specific,
+        // ordered pair, and require the same absolute offset in later files.
+        static const QRegularExpression seasonEpisode(QStringLiteral(
+            "(?<![\\p{L}\\p{N}])s[0-9]{1,2}[ ._-]*e([0-9]{1,4})"));
+        static const QRegularExpression japaneseEpisode(QStringLiteral("第([0-9]{1,4})話"));
+        const auto seasonMatch = seasonEpisode.match(base);
+        const auto japaneseMatch = japaneseEpisode.match(base);
+        const auto isToken = [&tokens](const QRegularExpressionMatch &match) {
+            return match.hasMatch() && std::any_of(tokens.cbegin(), tokens.cend(),
+                [&match](const EpisodeToken &token) {
+                    return token.start == match.capturedStart(1) &&
+                           token.length == match.capturedLength(1);
+                });
+        };
+        if (isToken(seasonMatch) && isToken(japaneseMatch) &&
+            seasonMatch.capturedStart(1) < japaneseMatch.capturedStart(1) &&
+            japaneseMatch.captured(1).toInt() >= seasonMatch.captured(1).toInt())
+        {
+            absoluteOffset = japaneseMatch.captured(1).toInt() - seasonMatch.captured(1).toInt();
+            tokens = {{seasonMatch.capturedStart(1), seasonMatch.capturedLength(1),
+                       seasonMatch.captured(1).toInt()}};
+        }
+    }
     if (episode > 0 && tokens.size() == 1 && tokens.front().number == episode)
     {
         mode = QStringLiteral("release");
-        pattern = releaseIdentity(normalized, leaf, extension, tokens.front());
+        pattern = releaseIdentity(normalized, leaf, extension, tokens.front(), version, absoluteOffset);
     }
-    return {{QStringLiteral("version"), 2}, {QStringLiteral("valid"), true},
+    return {{QStringLiteral("version"), version}, {QStringLiteral("valid"), true},
             {QStringLiteral("sampleName"), name}, {QStringLiteral("episode"), episode},
             {QStringLiteral("mode"), mode}, {QStringLiteral("pattern"), pattern}};
+}
+
+} // namespace
+
+QVariantMap SubtitleRelease::fromFile(const QString &name, int episode)
+{
+    return ruleForVersion(name, episode, 3);
 }
 
 bool SubtitleRelease::matches(const QString &name, int episode, const QVariantMap &rule)
 {
     const int version = rule.value(QStringLiteral("version")).toInt();
-    if ((version != 1 && version != 2) ||
+    if ((version < 1 || version > 3) ||
         !rule.value(QStringLiteral("valid")).toBool()) return false;
 
     const int sourceEpisode = rule.value(QStringLiteral("episode")).toInt();
     const QString sample = rule.value(QStringLiteral("sampleName")).toString();
-    const auto saved = version == 1 ? legacyRule(sample, sourceEpisode) : fromFile(sample, sourceEpisode);
+    const auto saved = version == 1 ? legacyRule(sample, sourceEpisode) :
+        ruleForVersion(sample, sourceEpisode, version);
     if (saved.isEmpty() ||
         saved.value(QStringLiteral("pattern")) != rule.value(QStringLiteral("pattern")) ||
         saved.value(QStringLiteral("mode")) != rule.value(QStringLiteral("mode")))
@@ -320,7 +382,7 @@ bool SubtitleRelease::matches(const QString &name, int episode, const QVariantMa
 
     // Old settings retain their validated source identity, while gaining the
     // independent episode parser. No rewrite of the library file is required.
-    const auto source = version == 1 ? fromFile(sample, sourceEpisode) : saved;
+    const auto source = version < 3 ? fromFile(sample, sourceEpisode) : saved;
     if (source.value(QStringLiteral("mode")) == QStringLiteral("exact"))
         return episode == sourceEpisode &&
                normalizedName(name) == source.value(QStringLiteral("pattern")).toString();

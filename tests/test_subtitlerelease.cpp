@@ -134,7 +134,7 @@ private slots:
     {
         QFETCH(QString, selected); QFETCH(QString, next);
         const auto rule = SubtitleRelease::fromFile(selected, 1);
-        QCOMPARE(rule.value("version").toInt(), 2);
+        QCOMPARE(rule.value("version").toInt(), 3);
         QCOMPARE(rule.value("mode").toString(), QString("release"));
         QVERIFY(SubtitleRelease::matches(next, 2, rule));
         QVERIFY(!SubtitleRelease::matches(next, 1, rule));
@@ -217,6 +217,98 @@ private slots:
             QVERIFY(SubtitleRelease::matches(name, 1, rule));
             QVERIFY(!SubtitleRelease::matches("Show EP3.ass", 3, rule));
             QVERIFY(!SubtitleRelease::matches(name, 2, rule));
+        }
+    }
+
+    void actualOshiNoKoSeasonAndAbsoluteEpisodes()
+    {
+        const QString selected = QStringLiteral("【推しの子】.S03E07.第31話「決裂」.WEBRip.Amazon.ja-jp[sdh].srt");
+        const QStringList previous{
+            QStringLiteral("【推しの子】.S03E04.第28話.盲目.WEBRip.Amazon.ja-jp[sdh].srt"),
+            QStringLiteral("【推しの子】.S03E05.第29話.営業.WEBRip.Amazon.ja-jp[sdh].srt"),
+            QStringLiteral("【推しの子】.S03E06.第30話.アイドルと恋愛.WEBRip.Amazon.ja-jp[sdh].srt")};
+        const auto rule = SubtitleRelease::fromFile(selected, 7);
+        QCOMPARE(rule.value("mode").toString(), QString("release"));
+        for (int index = 0; index < previous.size(); ++index)
+        {
+            QVERIFY2(SubtitleRelease::matches(previous.at(index), index + 4, rule),
+                     qPrintable(previous.at(index)));
+            const auto previousRule = SubtitleRelease::fromFile(previous.at(index), index + 4);
+            QVERIFY(SubtitleRelease::matches(selected, 7, previousRule));
+        }
+        const auto candidate = previous.constLast();
+        for (const auto &replacement : {qMakePair(QString("Amazon"), QString("Netflix")),
+                                         qMakePair(QString("ja-jp"), QString("en-us")),
+                                         qMakePair(QString("sdh"), QString("forced")),
+                                         qMakePair(QString(".srt"), QString(".ass")),
+                                         qMakePair(QString("S03"), QString("S02")),
+                                         qMakePair(QStringLiteral("第30話"), QStringLiteral("第31話"))})
+        {
+            QString changed = candidate;
+            changed.replace(replacement.first, replacement.second);
+            QVERIFY2(!SubtitleRelease::matches(changed, 6, rule), qPrintable(changed));
+        }
+        QVERIFY(!SubtitleRelease::matches(candidate, 5, rule));
+        QString missingAbsolute = candidate;
+        missingAbsolute.remove(QStringLiteral("第30話."));
+        QVERIFY(!SubtitleRelease::matches(missingAbsolute, 6, rule));
+        QString missingSource = candidate;
+        missingSource.remove(".Amazon");
+        QVERIFY(!SubtitleRelease::matches(missingSource, 6, rule));
+    }
+
+    void actualSavedExactRulesMigrate()
+    {
+        const QString selected = QStringLiteral("【推しの子】.S03E07.第31話「決裂」.WEBRip.Amazon.ja-jp[sdh].srt");
+        for (const int version : {1, 2})
+        {
+            const QVariantMap saved{{"version", version}, {"valid", true}, {"sampleName", selected},
+                {"episode", 7}, {"mode", "exact"}, {"pattern", selected.toCaseFolded()}};
+            QVERIFY(SubtitleRelease::matches(
+                QStringLiteral("【推しの子】.S03E06.第30話.アイドルと恋愛.WEBRip.Amazon.ja-jp[sdh].srt"), 6, saved));
+            QVERIFY(!SubtitleRelease::matches(
+                QStringLiteral("【推しの子】.S03E06.第30話.アイドルと恋愛.WEBRip.Netflix.ja-jp[sdh].srt"), 6, saved));
+        }
+    }
+
+    void unbracketedStreamingSourceIsReleaseIdentity()
+    {
+        const auto rule = SubtitleRelease::fromFile("Show.S01E01.First.WEBRip.Amazon.ja-jp[sdh].srt", 1);
+        QVERIFY(SubtitleRelease::matches("Show.S01E02.Second.WEBRip.Amazon.ja-jp[sdh].srt", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Show.S01E02.Second.WEBRip.Netflix.ja-jp[sdh].srt", 2, rule));
+        QVERIFY(!SubtitleRelease::matches("Show.S01E02.Second.WEBRip.ja-jp[sdh].srt", 2, rule));
+    }
+
+    void savedVersionTwoReleaseKeepsItsService()
+    {
+        // This is the exact identity serialized before source metadata was
+        // retained. Migration recovers Amazon from the saved original name.
+        QVariantMap saved{{"version", 2}, {"valid", true},
+            {"sampleName", "Show.S01E01.First.WEBRip.Amazon.ja-jp[sdh].srt"},
+            {"episode", 1}, {"mode", "release"}, {"pattern", QStringLiteral(
+                R"({"directory":"","extension":"srt","metadata":"ja-jp","revision":"","season":"1","tags":["sdh"],"technical":["ja","jp","webrip"],"title":"show"})")}};
+        QVERIFY(SubtitleRelease::matches("Show.S01E02.Second.WEBRip.Amazon.ja-jp[sdh].srt", 2, saved));
+        QVERIFY(!SubtitleRelease::matches("Show.S01E02.Second.WEBRip.Netflix.ja-jp[sdh].srt", 2, saved));
+        saved["pattern"] = "changed";
+        QVERIFY(!SubtitleRelease::matches("Show.S01E02.Second.WEBRip.Amazon.ja-jp[sdh].srt", 2, saved));
+    }
+
+    void onlyConsistentSeasonAbsolutePairsAreGeneralized()
+    {
+        const QStringList uncertain{
+            QStringLiteral("Show.S03E07.第06話.Title.WEBRip.Amazon.ja.srt"),
+            QStringLiteral("Show.S03E07.第31話.第32話.Title.WEBRip.Amazon.ja.srt"),
+            QStringLiteral("Show.S03E07.E08.第31話.Title.WEBRip.Amazon.ja.srt"),
+            QStringLiteral("Show.第31話.S03E07.Title.WEBRip.Amazon.ja.srt"),
+            QStringLiteral("[S03E07] Show.第31話.Title.WEBRip.Amazon.ja.srt"),
+            QStringLiteral("Show.S03E07~08.第31話.Title.WEBRip.Amazon.ja.srt")};
+        for (const auto &name : uncertain)
+        {
+            const auto rule = SubtitleRelease::fromFile(name, 7);
+            QCOMPARE(rule.value("mode").toString(), QString("exact"));
+            QVERIFY(SubtitleRelease::matches(name, 7, rule));
+            QVERIFY(!SubtitleRelease::matches(
+                QStringLiteral("Show.S03E08.第32話.Next.WEBRip.Amazon.ja.srt"), 8, rule));
         }
     }
 
