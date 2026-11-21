@@ -214,6 +214,13 @@ MenuBar {
             onTriggered: root.statisticsRequested()
         }
 
+        MenuItem {
+            visible: Features.isWindows
+            text: qsTr("&Watch Together...")
+            enabled: !WatchTogether.syncplaySession
+            onTriggered: watchTogetherDialog.openForCurrentMedia()
+        }
+
         Menu {
             id: chooseEpisodeMenu
             title: qsTr("&Choose Episode")
@@ -975,6 +982,11 @@ MenuBar {
         ]
         title: qsTr("Select Subtitle File")
         onAccepted: LocalSubtitleClient.loadFile(selectedFile.toString())
+    }
+
+    WatchTogetherDialog {
+        id: watchTogetherDialog
+        player: root.player
     }
 
     UpdateDialog {

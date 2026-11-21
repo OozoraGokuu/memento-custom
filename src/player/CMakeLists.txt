@@ -19,6 +19,9 @@ add_library(
     mpvtrack.cpp
     mpvtrack.h
 )
+if(WIN32)
+    target_sources(mpvplayer PRIVATE syncplaympv.cpp syncplaympv.h)
+endif()
 if(APPLE)
     target_sources(
         mpvplayer

@@ -24,6 +24,9 @@
 #include <QQuickWindow>
 
 #include "player/mpvrenderer.h"
+#if defined(Q_OS_WIN)
+#include "player/syncplaympv.h"
+#endif
 #include "util/utils.h"
 
 #ifdef Q_OS_MACOS
@@ -464,6 +467,17 @@ void MpvPlayer::initializeMpv()
     {
         throw std::runtime_error("MpvPlayer: Failed to initialize mpv context");
     }
+
+#if defined(Q_OS_WIN)
+    const QString syncplayError = SyncplayMpv::restoreOptions(
+        m_mpv, QCoreApplication::arguments());
+    if (!syncplayError.isEmpty())
+    {
+        qCritical("%s", qUtf8Printable(syncplayError));
+        emit shutdown();
+        return;
+    }
+#endif
 
     mpv_observe_property(m_mpv, 0, "chapter-list",        MPV_FORMAT_NODE);
     mpv_observe_property(m_mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG);

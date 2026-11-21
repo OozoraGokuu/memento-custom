@@ -102,6 +102,7 @@ qt_add_qml_module(
         qml/dialogs/AniListSearchDialog.qml
         qml/dialogs/TorrentSearchDialog.qml
         qml/dialogs/UpdateDialog.qml
+        qml/dialogs/WatchTogetherDialog.qml
         qml/Main.qml
         qml/objects/AudioFiles.qml
         qml/objects/AudioSourceResolver.qml
@@ -181,6 +182,7 @@ target_link_libraries(
     PRIVATE settings
     PRIVATE subtitle
     PRIVATE utils
+    PRIVATE watchtogether
 )
 set(
     MEMENTO_TRANSLATION_TS_FILES

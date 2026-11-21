@@ -935,7 +935,8 @@ MpvPlayer {
 
             /* Implements auto pause on hover */
             onHoveredChanged: {
-                if (subtitleHover.hovered && MementoSettings.searchPauseOnHover)
+                if (subtitleHover.hovered && MementoSettings.searchPauseOnHover &&
+                    !WatchTogether.syncplaySession)
                 {
                     root.controller.pause()
                 }
@@ -1053,7 +1054,8 @@ MpvPlayer {
 
             onHoveredChanged: {
                 if (secondarySubtitleHover.hovered &&
-                    MementoSettings.searchPauseOnHover)
+                    MementoSettings.searchPauseOnHover &&
+                    !WatchTogether.syncplaySession)
                 {
                     root.controller.pause();
                 }

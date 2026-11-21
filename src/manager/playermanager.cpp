@@ -24,6 +24,9 @@
 #include <cmath>
 
 #include "player/mpvplayer.h"
+#if defined(Q_OS_WIN)
+#include "quick/syncplayprocess.h"
+#endif
 #include "state/context.h"
 
 PlayerManager::PlayerManager(Context *context, QObject *parent) :
@@ -164,6 +167,12 @@ void PlayerManager::handleAutoPause()
     {
         return;
     }
+#if defined(Q_OS_WIN)
+    if (SyncplayProcess::isSyncplayProcess())
+    {
+        return;
+    }
+#endif
 
     if (m_autoPauseData.reset)
     {

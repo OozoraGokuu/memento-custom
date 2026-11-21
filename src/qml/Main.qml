@@ -200,7 +200,10 @@ ApplicationWindow {
                     MementoSettings.recentFilesAdd(player.state.path);
                 }
 
-                player.controller.play();
+                if (!WatchTogether.syncplaySession)
+                {
+                    player.controller.play();
+                }
             }
             onAuxiliarySearchRequested: function(text) {
                 MementoSettings.windowSearch = true;

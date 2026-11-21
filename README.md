@@ -28,6 +28,7 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 ## Included features
 
 - mpv playback, track selection, seeking, playlists, screenshots, configurable shortcuts and mpv settings.
+- On Windows, Watch Together rooms through Syncplay 1.7.5 or newer synchronize playback for viewers who each can access the same video.
 - Activity panel for episode loading/buffering, subtitles, dictionary setup, torrent searches and media exports.
 - Default **Jitendex** definitions and **JPDB** word-frequency dictionaries download automatically on a fresh profile. Install/retry them from Options → Dictionaries; existing dictionaries are preserved.
 - Japanese dictionary lookup, MeCab inflection analysis, Yomitan-format dictionaries and kanji lookup. [Dictionary downloads](docs/DICTIONARIES.md).
@@ -52,6 +53,12 @@ Flatpak manages its standard user (`~/.local/share/flatpak`) and system (`/var/l
 - **Migaku media export**: save a screenshot JPG and sentence MP3, named by episode and timestamp, in a chosen folder. Import them manually into Migaku Memory's Card Creator. No browser bridge or Migaku login is required.
 
 OCR is not enabled in these packages, matching the custom build. Provider availability and account permissions depend on the external services.
+
+## Watch together
+
+On Windows 10/11, install [Syncplay](https://syncplay.pl/guide/install/) 1.7.5 or newer on each computer. In Memento, open a local video and choose **Media → Watch Together…**. Create a room and copy its invite, or join with the server and room code someone sent you. Enter a display name and start Syncplay. It opens another Memento window for synchronized playback. Play, pause, and seek in that window to keep the room together.
+
+Each viewer needs their own accessible copy or stream of the video. The room shares playback state, not the video file. A local torrent stream in one Memento window cannot be sent to another viewer.
 
 ## Set up your accounts
 

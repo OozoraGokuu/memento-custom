@@ -103,3 +103,14 @@ target_link_libraries(
     PUBLIC Qt6::Core
     PUBLIC utils
 )
+
+add_library(
+    watchtogether
+    watchtogetherlauncher.cpp
+    watchtogetherlauncher.h
+    syncplayprocess.h
+)
+target_compile_features(watchtogether PRIVATE cxx_std_20)
+target_include_directories(watchtogether PRIVATE ${MEMENTO_INCLUDE_DIRS})
+target_compile_options(watchtogether PRIVATE ${MEMENTO_COMPILER_FLAGS})
+target_link_libraries(watchtogether PUBLIC Qt6::Core)

@@ -140,6 +140,29 @@ target_compile_options(memento_anki_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
 target_include_directories(memento_anki_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
 target_link_libraries(memento_anki_tests PRIVATE context managers Qt6::Concurrent Qt6::Network Qt6::Test)
 add_test(NAME anki-http-and-note COMMAND memento_anki_tests)
+
+if(WIN32)
+    add_executable(memento_watchtogether_tests test_watchtogether.cpp)
+    target_compile_features(memento_watchtogether_tests PRIVATE cxx_std_20)
+    target_compile_options(memento_watchtogether_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
+    target_include_directories(memento_watchtogether_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
+    target_link_libraries(memento_watchtogether_tests PRIVATE watchtogether Qt6::Test)
+    add_test(NAME watch-together-launcher COMMAND memento_watchtogether_tests)
+
+    add_executable(
+        memento_syncplay_mpv_tests
+        test_syncplaympv.cpp
+        ../src/player/syncplaympv.cpp
+    )
+    target_compile_features(memento_syncplay_mpv_tests PRIVATE cxx_std_20)
+    target_compile_options(memento_syncplay_mpv_tests PRIVATE ${MEMENTO_COMPILER_FLAGS})
+    target_include_directories(memento_syncplay_mpv_tests PRIVATE ${MEMENTO_INCLUDE_DIRS})
+    target_link_libraries(
+        memento_syncplay_mpv_tests
+        PRIVATE mpv::mpv Qt6::Core Qt6::Network Qt6::Test
+    )
+    add_test(NAME watch-together-mpv-config COMMAND memento_syncplay_mpv_tests)
+endif()
 if(APPLE)
     # This integration test creates a real player. The macOS renderer needs
     # Cocoa's OpenGL context support; Qt's offscreen plugin cannot provide it.

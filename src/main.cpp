@@ -72,6 +72,7 @@
 #include "quick/features.h"
 #include "quick/keytracker.h"
 #include "quick/paths.h"
+#include "quick/watchtogetherlauncher.h"
 #include "setting/migration.h"
 #include "setting/settings.h"
 #include "state/context.h"
@@ -341,6 +342,9 @@ static void registerQmlTypes(Context &context)
     );
     qmlRegisterSingletonInstance<Paths>(
         MEMENTO_URI, 1, 0, "MementoPaths", new Paths(&context)
+    );
+    qmlRegisterSingletonInstance<WatchTogetherLauncher>(
+        MEMENTO_URI, 1, 0, "WatchTogether", new WatchTogetherLauncher(&context)
     );
 
     /* Subtitle Types */
